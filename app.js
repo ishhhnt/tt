@@ -3361,6 +3361,7 @@ $("refreshBtn")?.addEventListener("click", refreshAppFeed);
     if (!pulling || isRefreshingApp) return;
     const dy = e.touches[0].clientY - startY;
     if (dy > 8 && mainEl.scrollTop <= 0) {
+      ptr.classList.remove("hide");
       pullDist = Math.min(88, dy * 0.55);
       ptr.style.height = pullDist + "px";
       ptr.style.opacity = Math.min(1, pullDist / 50);
@@ -3368,6 +3369,7 @@ $("refreshBtn")?.addEventListener("click", refreshAppFeed);
       if (ptrText) ptrText.textContent = pullDist >= 56 ? "Release to refresh" : "Pull to refresh";
     } else if (dy <= 0) {
       pulling = false;
+      ptr.classList.add("hide");
       ptr.style.height = "0px";
       ptr.style.opacity = "0";
     }
@@ -3384,6 +3386,7 @@ $("refreshBtn")?.addEventListener("click", refreshAppFeed);
       await refreshAppFeed();
     }
     ptr.classList.remove("ready", "refreshing");
+    ptr.classList.add("hide");
     ptr.style.height = "0px";
     ptr.style.opacity = "0";
     pullDist = 0;
