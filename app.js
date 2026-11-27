@@ -1,5 +1,5 @@
 import{initializeApp}from"https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js";
-import{getAuth,onAuthStateChanged,createUserWithEmailAndPassword,signInWithEmailAndPassword,GoogleAuthProvider,signInWithPopup,signOut,sendEmailVerification,sendPasswordResetEmail,updatePassword,EmailAuthProvider,reauthenticateWithCredential}from"https://www.gstatic.com/firebasejs/10.7.0/firebase-auth.js";
+import{getAuth,onAuthStateChanged,createUserWithEmailAndPassword,signInWithEmailAndPassword,GoogleAuthProvider,signInWithPopup,signOut,sendEmailVerification,sendPasswordResetEmail,updatePassword,EmailAuthProvider,reauthenticateWithCredential,deleteUser}from"https://www.gstatic.com/firebasejs/10.7.0/firebase-auth.js";
 import{getFirestore,doc,getDoc,setDoc,updateDoc,deleteDoc,collection,query,where,onSnapshot,addDoc,orderBy,limit,documentId,serverTimestamp,arrayUnion,arrayRemove}from"https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js";
 
 const app=initializeApp({apiKey:"AIzaSyCJkg8OOu3szJmBnvbbND6BJYT_9aQVExg",authDomain:"ishntt-f8b74.firebaseapp.com",projectId:"ishntt-f8b74",storageBucket:"ishntt-f8b74.firebasestorage.app",messagingSenderId:"1002308007099",appId:"1:1002308007099:web:ed0f89596a74f522bba59e"});
@@ -28,7 +28,7 @@ function setAuthSlides(items){
  },1500);
 }
 
-let me=null,guest=false,posts=[],mode="login",signing=false,ready=false,panelOpen=false,curChat=null,unsubMsgs=null,feedTab="foryou";
+let me=null,guest=false,posts=[],mode="login",signing=false,ready=false,panelOpen=false,curChat=null,unsubMsgs=null,feedTab="foryou",headerLogoTimer=null;
 const profiles=new Map(),chats=new Map(),watching=new Set(),T0=Date.now();
 
 function isDevUser(u) {
@@ -49,6 +49,42 @@ function isDevUser(u) {
 
 function verifiedBadgeHtml(showDevPill=false) {
   return `<span class="verified-badge-wrap" title="Verified Account"><svg viewBox="0 0 24 24" fill="none"><polygon points="12,1 15,3 19,3 20,7 23,9 22,13 23,17 20,19 19,23 15,23 12,25 9,23 5,23 4,19 1,17 2,13 1,9 4,7 5,3 9,3" fill="#0095f6"/><polyline points="7.5 12 10.5 15 16.5 9" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>${showDevPill ? '<span class="dev-tag-pill">DEV</span>' : ''}`;
+}
+
+function getVerifiedUsersMap() {
+  try { return JSON.parse(localStorage.getItem("ishnt_verified_users") || "{}"); }
+  catch { return {}; }
+}
+
+function isVerifiedUser(u) {
+  if (!u) return false;
+  if (isDevUser(u) || (u.username || "").toLowerCase() === "ishhhh") return true;
+  if (u.isVerified === true) return true;
+  const map = getVerifiedUsersMap();
+  if (u.uid && map[u.uid] === true) return true;
+  if (u.username && map["@" + u.username.toLowerCase()] === true) return true;
+  return false;
+}
+
+async function setUserVerified(uid, username, verified) {
+  const map = getVerifiedUsersMap();
+  if (uid) {
+    if (verified) map[uid] = true;
+    else delete map[uid];
+  }
+  if (username) {
+    const key = "@" + username.toLowerCase();
+    if (verified) map[key] = true;
+    else delete map[key];
+  }
+  try { localStorage.setItem("ishnt_verified_users", JSON.stringify(map)); } catch {}
+  if (uid && profiles.has(uid)) {
+    const cached = profiles.get(uid);
+    if (cached) cached.isVerified = verified;
+  }
+  if (uid && !uid.startsWith("g_") && !uid.startsWith("dev_")) {
+    try { await updateDoc(doc(db, "users", uid), { isVerified: Boolean(verified) }); } catch {}
+  }
 }
 
 const getFollowing=()=>{
@@ -115,7 +151,7 @@ function dlg(title,body,ok,onOk){
   document.body.appendChild(o);
   if(title==="Edit post"){o.querySelector("[data-ok]")?.setAttribute("aria-label","Save post changes")}
   const close=()=>o.remove();
-  o.onclick=e=>{if(e.target===o||e.target.dataset.x!==undefined)close()};
+  o.onclick=e=>{if(e.target===o||e.target.closest("[data-x]"))close()};
   const b=o.querySelector("[data-ok]");
   if(b)b.onclick=()=>busy(b,async()=>{if(await onOk(o)!==false)close()});
   return o;
@@ -238,7 +274,7 @@ try{
 }catch(e){}
 const okName=n=>/^[a-z0-9_.]{3,20}$/.test(n);
 async function nameFree(n){return!(await getDoc(doc(db,"usernames",n))).exists()}
-async function makeProfile(u,name,pic){await setDoc(doc(db,"usernames",name),{uid:u.uid,email:u.email||"",createdAt:serverTimestamp()});await setDoc(doc(db,"users",u.uid),{username:name,email:u.email||"",profilePic:pic||"",createdAt:serverTimestamp()})}
+async function makeProfile(u,name,pic){await setDoc(doc(db,"usernames",name),{uid:u.uid,createdAt:serverTimestamp()});await setDoc(doc(db,"users",u.uid),{username:name,profilePic:pic||"",createdAt:serverTimestamp()})}
 $("aGo").onclick=()=>busy($("aGo"),async()=>{
   const e=$("aMail").value.trim(),p=$("aPass").value,n=$("aUser").value.trim().toLowerCase(),er=$("aErr");er.textContent="";
   if(!e||!p){er.textContent="Enter both email and password.";return}
@@ -372,7 +408,7 @@ $("aVerifyBack")&&($("aVerifyBack").onclick=async()=>{
 });
 
 $("aGoogle").onclick=()=>busy($("aGoogle"),async()=>{await signInWithPopup(auth,new GoogleAuthProvider())});
-$("aSkip").onclick=()=>{let g=localStorage.getItem("guestId");if(!g){g="g_"+Math.random().toString(36).slice(2,10);localStorage.setItem("guestId",g)}guest=true;me={uid:g,username:"guest_"+g.slice(2,6),guest:true};start()};
+($("aSkip")||$("aGuest"))&&(($("aSkip")||$("aGuest")).onclick=()=>{let g=localStorage.getItem("guestId");if(!g){g="g_"+Math.random().toString(36).slice(2,10);localStorage.setItem("guestId",g)}guest=true;me={uid:g,username:"guest_"+g.slice(2,6),guest:true};start()});
 $("aForgot").onclick=()=>dlg("Reset password",`<input class="in" id="fe" type="email" placeholder="Your account email" value="${esc($("aMail").value.trim())}">`,"Send link",async o=>{const e=o.querySelector("#fe").value.trim();if(!e){say("Enter your email.");return false}await sendPasswordResetEmail(auth,e);mailSent("reset")});
 function mailSent(k){const v=k=="verify";dlg(v?"📧 Verification email sent!":"📧 Password reset email sent!",`<div>From: <b>noreply@ishntt-f8b74.firebaseapp.com</b></div><div>Check your Inbox and your <b>Spam</b> folder.</div><div style="color:var(--m)">${v?"After tapping the link, press “I’ve verified” in the banner or refresh the page.":"Open the link, set a new password, then log in."}</div>`,"Got it",()=>{})}
 const canAct=()=>{if(guest||me?.verified||isDevUser(me))return true;say("Verify your email first. Use Resend in the banner.");return false};
@@ -428,7 +464,7 @@ async function init(u){guest=false;try{await u.reload()}catch{}let p=await getUs
  me={uid:u.uid,username:p.username,email:u.email,profilePic:p.profilePic,contacts:p.contacts||[],following:p.following||[],followers:p.followers||[],verified:u.emailVerified,pw:u.providerData.some(x=>x.providerId=="password")};
  try{localStorage.setItem("ishnt_following_"+me.uid,JSON.stringify(me.following));}catch(x){}
  start();}
-let headerLogoTimer;
+
 function syncHeaderLogo(){
  clearTimeout(headerLogoTimer);
  const logo=$("headerLogo"),username=!guest&&me?.username;
@@ -464,7 +500,7 @@ async function loadImages() {
     posts = (j.images || [])
       .filter(p => p.id && p.id.toString().trim() !== "" && !/__(dp|chat|album)__/.test(p.tags || p.caption || ""))
       .sort((a, b) => new Date(b.date) - new Date(a.date));
-    setAuthSlides(posts);
+    setAuthSlides(posts.filter(isPhotoPost));
     setupTrendingCards(posts);
       
   } catch (e) {
@@ -475,10 +511,9 @@ async function loadImages() {
   }
   renderGallery();
 }
-loadImages();
-
 let trendingIndex = 0;
 let trendingPosts = [];
+loadImages();
 
 const getLikedPosts = () => {
   try { return new Set(JSON.parse(localStorage.getItem("ishnt_liked_posts") || "[]")); }
@@ -510,6 +545,50 @@ const togglePostLike = id => {
   return { liked: !liked, count: m[id] };
 };
 
+const videoBlobCache = new Map();
+async function loadVideoSrc(videoEl, url) {
+  if (!videoEl || !url) return;
+  const tryPlay = () => {
+    if (videoEl.hasAttribute("autoplay") || videoEl.classList.contains("reel-video")) {
+      videoEl.muted = videoEl.classList.contains("reel-video") ? Boolean(window.reelsMuted) : true;
+      videoEl.play().catch(() => {
+        videoEl.muted = true;
+        videoEl.play().catch(() => {});
+      });
+    }
+  };
+  if (url.startsWith("blob:") || url.startsWith("data:")) {
+    if (videoEl.src !== url) videoEl.src = url;
+    tryPlay();
+    return;
+  }
+  if (videoBlobCache.has(url)) {
+    const cached = videoBlobCache.get(url);
+    if (videoEl.src !== cached) videoEl.src = cached;
+    tryPlay();
+    return;
+  }
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const buf = await res.arrayBuffer();
+    const u8 = new Uint8Array(buf.slice(0, 16));
+    let mime = "video/mp4";
+    if (u8[0] === 0x1a && u8[1] === 0x45 && u8[2] === 0xdf && u8[3] === 0xa3) {
+      mime = "video/webm";
+    } else if (u8[4] === 0x66 && u8[5] === 0x74 && u8[6] === 0x79 && u8[7] === 0x70) {
+      mime = "video/mp4";
+    }
+    const blobUrl = URL.createObjectURL(new Blob([buf], { type: mime }));
+    videoBlobCache.set(url, blobUrl);
+    videoEl.src = blobUrl;
+    tryPlay();
+  } catch (err) {
+    videoEl.src = url;
+    tryPlay();
+  }
+}
+
 function setupTrendingCards(items) {
   const card = $("trendingCard");
   if (!card) return;
@@ -529,14 +608,43 @@ function renderTrendingStack() {
   const pMid = trendingPosts[(trendingIndex + 1) % n];
   const pBack = trendingPosts[(trendingIndex + 2) % n];
 
-  const frontImg = $("tCardFront")?.querySelector(".t-img");
-  const midImg = $("tCardMid")?.querySelector(".t-img");
-  const backImg = $("tCardBack")?.querySelector(".t-img");
-
   const getFirstMediaUrl = p => (!p ? "" : (Array.isArray(p.mediaUrls) && p.mediaUrls[0] ? fullUrl(p.mediaUrls[0]) : imgUrl(p.id)));
-  if (frontImg && pFront) frontImg.src = getFirstMediaUrl(pFront);
-  if (midImg && pMid) midImg.src = getFirstMediaUrl(pMid);
-  if (backImg && pBack) backImg.src = getFirstMediaUrl(pBack);
+  const setCardMedia = (cardEl, post) => {
+    if (!cardEl || !post) return;
+    const url = getFirstMediaUrl(post);
+    const isVid = isVideoPost(post);
+    const existing = cardEl.querySelector(".t-img");
+    if (isVid) {
+      if (existing && existing.tagName === "VIDEO") {
+        loadVideoSrc(existing, url);
+      } else {
+        const v = document.createElement("video");
+        v.className = "t-img";
+        v.muted = true;
+        v.loop = true;
+        v.autoplay = true;
+        v.playsInline = true;
+        v.preload = "metadata";
+        if (existing) existing.replaceWith(v);
+        else cardEl.prepend(v);
+        loadVideoSrc(v, url);
+      }
+    } else {
+      if (existing && existing.tagName === "IMG") {
+        if (existing.getAttribute("src") !== url) existing.src = url;
+      } else {
+        const img = document.createElement("img");
+        img.className = "t-img";
+        img.src = url;
+        img.alt = post.caption || "";
+        if (existing) existing.replaceWith(img);
+        else cardEl.prepend(img);
+      }
+    }
+  };
+  setCardMedia($("tCardFront"), pFront);
+  setCardMedia($("tCardMid"), pMid);
+  setCardMedia($("tCardBack"), pBack);
 
   if ($("tUsername")) $("tUsername").textContent = pFront.username || "Anonymous";
   if ($("tCaption")) $("tCaption").textContent = pFront.caption || "";
@@ -614,22 +722,88 @@ function getPostTypes(p){
 function isVideoPost(p) {
   if (!p) return false;
   if (p.fileType === "video") return true;
-  const types = getPostMediaTypes ? getPostMediaTypes(p) : (p.fileTypes || [p.fileType || "image"]);
+  const types = getPostTypes(p);
   if (types.some(t => t === "video")) return true;
+  if (/\b(reel|reels|video)\b/i.test(p.tags || "")) return true;
+  if (/\b(reel|reels)\b/i.test(p.caption || "")) return true;
+  if (p.mediaUrl && /\.(mp4|webm|mov|mkv)(\?|$)/i.test(p.mediaUrl)) return true;
   const images = getPostImages(p);
-  if (images.some(u => typeof u === "string" && (u.endsWith(".mp4") || u.endsWith(".webm") || u.endsWith(".mov")))) return true;
+  if (images.some(u => typeof u === "string" && /\.(mp4|webm|mov|mkv)(\?|$)/i.test(u))) return true;
   return false;
+}
+
+function isPhotoPost(p) {
+  return !isVideoPost(p);
+}
+
+function getSourceBadge(p) {
+  if (!p) return null;
+  const rawCap = p.caption || "";
+  const urlMatch = rawCap.match(/(?:^|\n)Source:\s*(https?:\/\/\S+)/i);
+  const url = p.sourceLink || (urlMatch ? urlMatch[1] : "");
+  const t = ((p.tags || "") + " " + rawCap).toLowerCase();
+
+  if (/#original\b/.test(t)) return {
+    label: "Original",
+    cls: "src-original",
+    tooltip: "Uploaded by original creator",
+    detailText: "Uploaded by original creator",
+    url,
+    icon: '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>'
+  };
+  if (/#(ai|aicreated)\b/.test(t)) return {
+    label: "AI Generated",
+    cls: "src-ai",
+    tooltip: "Generated using AI",
+    detailText: "Generated using AI",
+    url,
+    icon: '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 4.5L18.5 9l-4.6 1.5L12 15l-1.9-4.5L5.5 9l4.6-1.5L12 3z"/></svg>'
+  };
+  if (/#pinterest\b/.test(t)) return {
+    label: "Via Pinterest",
+    cls: "src-pinterest",
+    tooltip: "Downloaded & shared from Pinterest",
+    detailText: "Downloaded from Pinterest",
+    url,
+    icon: '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 0 0-3.5 19.37c-.1-.83-.18-2.1.04-3 .2-.82 1.25-5.3 1.25-5.3s-.32-.64-.32-1.58c0-1.48.86-2.58 1.93-2.58.91 0 1.35.68 1.35 1.5 0 .91-.58 2.28-.88 3.55-.25 1.06.53 1.92 1.57 1.92 1.89 0 3.34-1.99 3.34-4.86 0-2.54-1.83-4.32-4.44-4.32-3.02 0-4.8 2.27-4.8 4.61 0 .91.35 1.89.79 2.42.09.11.1.2.07.31-.08.33-.26 1.06-.3 1.21-.05.2-.16.24-.37.14-1.38-.64-2.24-2.66-2.24-4.28 0-3.49 2.53-6.69 7.3-6.69 3.83 0 6.81 2.73 6.81 6.38 0 3.81-2.4 6.87-5.73 6.87-1.12 0-2.17-.58-2.53-1.27l-.69 2.63c-.25.96-.92 2.16-1.37 2.89A10 10 0 1 0 12 2z"/></svg>'
+  };
+  if (/#(google|web)\b/.test(t)) return {
+    label: "From Web",
+    cls: "src-web",
+    tooltip: "Sourced from the web",
+    detailText: "Sourced from the web",
+    url,
+    icon: '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>'
+  };
+  if (/#other\b/.test(t)) return {
+    label: "Reposted",
+    cls: "src-other",
+    tooltip: "Shared from another source",
+    detailText: "Reposted from another source",
+    url,
+    icon: '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>'
+  };
+  return null;
+}
+
+function getDisplayCaption(p) {
+  return String(p?.caption || "").replace(/(?:^|\n)Source:\s*https?:\/\/\S+/gi, "").trim();
 }
 
 function filtered(){
   const q=$("q")?.value.trim().toLowerCase() || "";
   let list = posts;
 
-  if (feedTab === "following") {
-    const followingSet = getFollowing();
-    list = list.filter(p => followingSet.has(p.uid) || (!guest && me && p.uid === me.uid));
-  } else if (feedTab === "reels") {
+  if (feedTab === "reels") {
+    // REELS: STRICTLY VIDEOS ONLY (NO PHOTOS!)
     list = list.filter(p => isVideoPost(p));
+  } else if (feedTab === "following") {
+    const followingSet = getFollowing();
+    // FOLLOWING: ONLY PEOPLE YOU FOLLOW (PHOTOS ONLY)
+    list = followingSet.size ? list.filter(p => followingSet.has(p.uid) && isPhotoPost(p)) : [];
+  } else {
+    // FOR YOU (HOME FEED): STRICTLY PHOTOS ONLY (NO VIDEOS - VIDEOS ONLY IN REELS)
+    list = list.filter(p => isPhotoPost(p));
   }
 
   if(!q) return list;
@@ -749,15 +923,16 @@ function renderGallery(list=filtered(), el=$("grid")) {
     if (tc) tc.classList.add("hide");
   }
 
-  el.className = "grid";
+  const isP3 = el.classList.contains("p3");
+  el.className = isP3 ? "grid p3" : "grid";
   el.innerHTML = "";
   if (!list.length) {
     if (feedTab === "following" && el === $("grid")) {
       el.innerHTML = `
         <div class="empty" style="grid-column:1/-1;padding:44px 16px;text-align:center">
           <div style="font-size:42px;margin-bottom:10px">👥</div>
-          <b style="font-size:17px;display:block;margin-bottom:8px">Follow creators to see their posts here</b>
-          <p style="color:var(--m);font-size:13px;max-width:320px;margin:0 auto 18px">When you follow creators, their latest photos and carousels will appear in your Following feed.</p>
+          <b style="font-size:17px;display:block;margin-bottom:8px">Not following yet</b>
+          <p style="color:var(--m);font-size:13px;max-width:320px;margin:0 auto 18px">Follow creators to see their latest photos and carousels here.</p>
           <button class="btn pri" id="btnExploreMore">Explore creators</button>
         </div>
       `;
@@ -804,7 +979,10 @@ function renderReelsFeed(list, el) {
   el.className = "grid reels-view-active";
   el.innerHTML = "";
 
-  if (!list.length) {
+  // Strictly filter only videos so photos NEVER appear in Reels
+  const videoList = (list || []).filter(p => isVideoPost(p));
+
+  if (!videoList.length) {
     el.innerHTML = `
       <div class="empty-reels-box">
         <div class="empty-reels-icon">🎬</div>
@@ -821,7 +999,7 @@ function renderReelsFeed(list, el) {
   container.className = "reels-container";
   container.id = "reelsContainer";
 
-  list.forEach(p => {
+  videoList.forEach(p => {
     const card = makeReelCard(p);
     if (card) container.appendChild(card);
   });
@@ -847,7 +1025,7 @@ function makeReelCard(p) {
 
   card.innerHTML = `
     <div class="reel-video-wrap">
-      <video class="reel-video" src="${videoUrl}" loop playsinline preload="metadata" ${window.reelsMuted ? 'muted' : ''}></video>
+      <video class="reel-video" data-vsrc="${videoUrl}" loop playsinline preload="metadata" ${window.reelsMuted ? 'muted' : ''}></video>
       <div class="reel-play-overlay">▶</div>
       <div class="reel-heart-pop">❤️</div>
     </div>
@@ -897,7 +1075,7 @@ function makeReelCard(p) {
         <div class="reel-avatar" data-user="${esc(p.username)}">
           ${(p.username || "A").slice(0, 1).toUpperCase()}
         </div>
-        <span class="reel-username" data-user="${esc(p.username)}">@${esc(p.username)} ${isDevUser(p) || p.username === "ishhhh" ? verifiedBadgeHtml(true) : ""}</span>
+        <span class="reel-username" data-user="${esc(p.username)}">@${esc(p.username)} ${isVerifiedUser(p) ? verifiedBadgeHtml(isDevUser(p)) : ""}</span>
         ${!isOwn ? `
           <button type="button" class="reel-follow-btn ${userFollowing ? 'on' : ''}" data-uid="${esc(p.uid)}" data-uname="${esc(p.username)}">
             ${userFollowing ? 'Following' : 'Follow'}
@@ -915,6 +1093,7 @@ function makeReelCard(p) {
   `;
 
   const video = card.querySelector(".reel-video");
+  loadVideoSrc(video, videoUrl);
   const playOverlay = card.querySelector(".reel-play-overlay");
   const heartPop = card.querySelector(".reel-heart-pop");
   const soundBtn = card.querySelector(".reel-sound-btn");
@@ -1107,7 +1286,7 @@ function makeCard(p){
         </div>
         <div class="pin-carousel-track" data-track>
           ${images.map((url, i) => (types[i] === "video" || url.endsWith(".mp4")) ? `
-            <video class="pic pin-slide" src="${url}" preload="metadata" muted playsinline data-idx="${i}"></video>
+            <video class="pic pin-slide" data-vsrc="${url}" preload="metadata" muted playsinline data-idx="${i}"></video>
           ` : `
             <img class="pic pin-slide" loading="${i===0?'eager':'lazy'}" src="${url}" alt="${esc(p.caption||"")}" data-idx="${i}">
           `).join("")}
@@ -1120,7 +1299,7 @@ function makeCard(p){
           <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 3 20 12 6 21 6 3"></polygon></svg>
           <span>Video</span>
         </div>
-        <video class="pic" src="${images[0] || imgUrl(p.id)}" preload="metadata" muted playsinline></video>
+        <video class="pic" data-vsrc="${images[0] || imgUrl(p.id)}" preload="metadata" muted playsinline></video>
       ` : `
         <img class="pic" loading="lazy" src="${images[0] || imgUrl(p.id)}" alt="${esc(p.caption||"")}">
       `)}
@@ -1156,6 +1335,7 @@ function makeCard(p){
   } else {
     c.onclick = () => openPostView(p);
   }
+  c.querySelectorAll("video[data-vsrc]").forEach(v => loadVideoSrc(v, v.getAttribute("data-vsrc")));
 
   const primaryMedia = c.querySelector(".pic");
   if (primaryMedia) {
@@ -1193,27 +1373,52 @@ function openPostView(p){
  let currentSlide=0;
 
  const o=document.createElement("div");o.className="ov pv";
- const cleanTags=(p.tags||"").replace(/__album:[^_\s]+__/g,"");
- const rawTags=cleanTags.split(/[\s,]+/).filter(Boolean).filter(t=>!t.startsWith("__"));
+ const cleanTags=(p.tags||"").replace(/__album:[^_s]+__/g,"");
+ const rawTags=cleanTags.split(/[s,]+/).filter(Boolean).filter(t=>!t.startsWith("__"));
  const tags=rawTags.map(t=>`<button type="button" class="pv-tag-btn tag">${esc(t.startsWith("#")?t:"#"+t)}</button>`).join("");
+ const srcBadge = getSourceBadge(p);
 
- o.innerHTML=`<div class="sheet g pvs">
+ o.innerHTML=`<div class="sheet g pvs pv-modal-sheet">
    <div class="pv-card">
+     <!-- Top Header: Author, Verified, Date, Follow, Close -->
+     <div class="pv-top-header">
+       <div class="pv-user-info">
+         <span data-a class="clickable-user pv-avatar-wrap">${av(p.username,"","m")}</span>
+         <div class="clickable-user pv-user-text">
+           <div class="pv-user-name-row">
+             <h2 class="pv-username"><b>${esc(p.username)} ${isVerifiedUser(p) ? verifiedBadgeHtml(isDevUser(p)) : ""}</b></h2>
+             ${(!guest && me && me.uid !== p.uid) ? `
+               <span class="pv-header-dot">•</span>
+               <button type="button" class="btn-follow ${isFollowing(p.uid) ? 'following' : ''}" id="pvFollowBtn">
+                 <span>${isFollowing(p.uid) ? 'Following' : 'Follow'}</span>
+               </button>
+             ` : ""}
+           </div>
+           <div class="pv-meta-sub">
+             ${p.date&&!isNaN(new Date(p.date))?`<small class="pv-date">${new Date(p.date).toLocaleDateString(undefined,{day:"numeric",month:"short",year:"numeric"})}</small>`:""}
+             ${srcBadge ? `<span class="pv-source-pill ${srcBadge.cls}">${srcBadge.label}</span>` : ""}
+           </div>
+         </div>
+       </div>
+       <button class="ib pv-close-btn" data-x aria-label="Close" title="Close">${IC.x}</button>
+     </div>
+
+     <!-- Media Container: Ambient Backdrop + Sharp Centered Photo/Video -->
      ${isMulti ? `
-       <div class="pvi pv-carousel-container">
+       <div class="pvi pv-media-container pv-carousel-container">
          <div class="pv-carousel-viewport" id="pvViewport">
            ${images.map((url, i) => `
              <div class="pv-slide" data-idx="${i}">
+               <div class="pv-ambient-bg" style="background-image:url('${url}')"></div>
                ${(types[i] === "video" || url.endsWith(".mp4")) ? `
-                 <video class="big" src="${url}" controls playsinline preload="metadata"></video>
+                 <video class="big pv-media-content" data-vsrc="${url}" controls playsinline preload="metadata"></video>
                ` : `
-                 <img class="big" src="${url}" alt="${esc(p.caption||"")}" loading="${i===0?'eager':'lazy'}">
+                 <img class="big pv-media-content" src="${url}" alt="${esc(p.caption||"")}" loading="${i===0?'eager':'lazy'}">
                `}
              </div>
            `).join("")}
          </div>
          <div class="pv-carousel-counter" id="pvCounter">1 / ${images.length}</div>
-         <button class="ib pv-close-btn" data-x aria-label="Close">${IC.x}</button>
          <button class="pv-nav-arrow pv-nav-prev hide" id="pvPrev" aria-label="Previous photo">
            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
          </button>
@@ -1225,30 +1430,20 @@ function openPostView(p){
          </div>
        </div>
      ` : `
-       <div class="pvi">
+       <div class="pvi pv-media-container">
+         <div class="pv-ambient-bg" style="background-image:url('${images[0] || imgUrl(p.id)}')"></div>
          ${(types[0] === "video" || (images[0]||"").endsWith(".mp4")) ? `
-           <video class="big" src="${images[0] || imgUrl(p.id)}" controls playsinline></video>
+           <video class="big pv-media-content" data-vsrc="${images[0] || imgUrl(p.id)}" controls playsinline></video>
          ` : `
-           <img class="big" src="${images[0] || imgUrl(p.id)}" alt="${esc(p.caption||"")}">
+           <img class="big pv-media-content" src="${images[0] || imgUrl(p.id)}" alt="${esc(p.caption||"")}">
          `}
-         <button class="ib pv-close-btn" data-x aria-label="Close">${IC.x}</button>
        </div>
      `}
+
+     <!-- Post Body: Clean Instagram Action Bar, Caption, Tags, Comments, More -->
      <div class="pv-body">
-       <div class="pv-headline-row">
-         <div class="pv-user-info">
-           <span data-a class="clickable-user">${av(p.username,"","m")}</span>
-           <div class="clickable-user" style="cursor:pointer">
-             <h2 class="pv-username"><b>${esc(p.username)} ${isDevUser(p) || p.username === "ishhhh" ? verifiedBadgeHtml(true) : ""}</b></h2>
-             ${p.date&&!isNaN(new Date(p.date))?`<small class="pv-date">${new Date(p.date).toLocaleDateString(undefined,{day:"numeric",month:"short",year:"numeric"})}</small>`:""}
-           </div>
-           ${(!guest && me && me.uid !== p.uid) ? `
-             <button type="button" class="btn-follow ${isFollowing(p.uid) ? 'following' : ''}" id="pvFollowBtn">
-               <span>${isFollowing(p.uid) ? 'Following' : 'Follow'}</span>
-             </button>
-           ` : ""}
-         </div>
-         <div class="pv-action-icons">
+       <div class="pv-action-bar">
+         <div class="pv-action-left">
            <button class="btn sq pv-action-btn pv-like-btn ${liked?'liked':''}" id="pvLike" title="Like post" aria-label="Like">
              <svg class="ic pv-heart-ic" viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
              <span class="pv-count-badge" id="pvLikeCount">${likeCount||""}</span>
@@ -1257,13 +1452,34 @@ function openPostView(p){
              ${IC.chat}
              <span class="pv-count-badge" id="pvCommentCount">${cmCount||""}</span>
            </button>
-           <button class="btn sq" id="vw" title="View full" aria-label="View full">${IC.expand}</button>
-           <button class="btn sq" id="dl" title="Download" aria-label="Download">${IC.dl}</button>
-           ${own?`<button class="btn sq" id="ed" title="Edit post" aria-label="Edit post">${IC.edit}</button><button class="btn sq dng" id="de" title="Delete post" aria-label="Delete post">${IC.trash}</button>`:""}
+           <button class="btn sq pv-action-btn" id="vw" title="View fullscreen" aria-label="View full">${IC.expand}</button>
+           <button class="btn sq pv-action-btn" id="dl" title="Download" aria-label="Download">${IC.dl}</button>
          </div>
+         ${own ? `
+           <div class="pv-action-right">
+             <button class="btn sq pv-action-btn" id="ed" title="Edit post" aria-label="Edit post">${IC.edit}</button>
+             <button class="btn sq pv-action-btn dng" id="de" title="Delete post" aria-label="Delete post">${IC.trash}</button>
+           </div>
+         ` : ""}
        </div>
-       <div class="pv-caption-text" id="cap">${esc(p.caption||"")}</div>
-       ${tags?`<div class="pv-hashtags-group" id="tg">${tags}</div>`:""}
+
+       ${getDisplayCaption(p) ? `
+         <div class="pv-caption-box">
+           <span class="pv-caption-author clickable-user"><b>${esc(p.username)}</b></span>
+           <span class="pv-caption-text" id="cap">${esc(getDisplayCaption(p))}</span>
+         </div>
+       ` : `<div class="pv-caption-box hide" id="cap"></div>`}
+
+       ${srcBadge ? `
+         <div class="pv-attribution-row">
+           ${srcBadge.icon}
+           <span>Source: <b>${esc(srcBadge.detailText)}</b></span>
+           ${srcBadge.url ? `<a href="${esc(srcBadge.url)}" target="_blank" rel="noopener noreferrer" class="pv-attribution-link">View original ↗</a>` : ""}
+         </div>
+       ` : ""}
+
+       ${tags ? `<div class="pv-hashtags-group" id="tg">${tags}</div>` : ""}
+
        <div class="pv-comments-section hide" id="pvCommentsSection">
          <div class="pv-comments-header">Comments (<span id="cmHeaderCount">${cmCount}</span>)</div>
          <div id="cms" class="pv-comments-container"></div>
@@ -1272,28 +1488,31 @@ function openPostView(p){
            <button class="btn pri" id="cs" ${guest?"disabled":""}>Send</button>
          </div>
        </div>
-       ${otherPosts.length?`
+
+       ${otherPosts.length ? `
          <div class="pv-more-section">
            <div class="pv-more-header">
              <span class="pv-more-title">More to explore</span>
              <span class="pv-more-hint">Tap to view</span>
            </div>
            <div class="pv-more-grid">
-             ${otherPosts.slice(0,12).map(op=>`
-               <div class="pv-more-item" data-more-id="${op.id}">
-                 <img src="${(Array.isArray(op.mediaUrls)&&op.mediaUrls[0]?fullUrl(op.mediaUrls[0]):imgUrl(op.id))}" alt="${esc(op.caption||"")}" loading="lazy">
-               </div>
-             `).join("")}
+             ${otherPosts.slice(0,12).map(op=>{
+               const opUrl = Array.isArray(op.mediaUrls)&&op.mediaUrls[0]?fullUrl(op.mediaUrls[0]):imgUrl(op.id);
+               return `<div class="pv-more-item" data-more-id="${op.id}">
+                 ${isVideoPost(op) ? `<video src="${opUrl}#t=0.1" muted playsinline preload="metadata"></video>` : `<img src="${opUrl}" alt="${esc(op.caption||"")}" loading="lazy">`}
+               </div>`;
+             }).join("")}
            </div>
          </div>
-       `:""}
+       ` : ""}
      </div>
    </div>
  </div>`;
 
  document.body.appendChild(o);const $$=s=>o.querySelector(s);
- getUserProfile(p.uid).then(u=>{if(u){$$("[data-a]").innerHTML=av(u.username,u.profilePic,"m");$$(".pv-username b").innerHTML=esc(u.username) + (isDevUser(u) || u.username === "ishhhh" ? verifiedBadgeHtml(true) : "");}});
- const cm=l=>{$$("#cms").innerHTML=(l||[]).length?l.map((c,ci)=>`<div class="cm" style="display:flex;align-items:center;justify-content:space-between;gap:8px"><div style="flex:1;min-width:0;word-break:break-word"><b>${esc(c.username)} ${isDevUser(c) || c.username === "ishhhh" ? verifiedBadgeHtml() : ''}</b> <span>${esc(c.text)}</span></div>${(!guest && (isDev || (me && me.username === c.username) || own)) ? `<button type="button" class="cm-del-btn" data-del-comment="${ci}" title="Delete comment" aria-label="Delete comment">✕</button>` : ''}</div>`).join(""):'<div class="empty" style="padding:10px">No comments yet. Start the conversation.</div>'};cm(p.comments);
+ o.querySelectorAll("video[data-vsrc]").forEach(v => loadVideoSrc(v, v.getAttribute("data-vsrc")));
+ getUserProfile(p.uid).then(u=>{if(u){$$("[data-a]").innerHTML=av(u.username,u.profilePic,"m");$$(".pv-username b").innerHTML=esc(u.username) + (isVerifiedUser(u) ? verifiedBadgeHtml(isDevUser(u)) : "");}});
+ const cm=l=>{$$("#cms").innerHTML=(l||[]).length?l.map((c,ci)=>`<div class="cm" style="display:flex;align-items:center;justify-content:space-between;gap:8px"><div style="flex:1;min-width:0;word-break:break-word"><b>${esc(c.username)} ${isVerifiedUser(c) ? verifiedBadgeHtml(isDevUser(c)) : ''}</b> <span>${esc(c.text)}</span></div>${(!guest && (isDev || (me && me.username === c.username) || own)) ? `<button type="button" class="cm-del-btn" data-del-comment="${ci}" title="Delete comment" aria-label="Delete comment">✕</button>` : ''}</div>`).join(""):'<div class="empty" style="padding:10px">No comments yet. Start the conversation.</div>'};cm(p.comments);
  $$("#cms").onclick = async e => {
    const btn = e.target.closest("[data-del-comment]");
    if (!btn) return;
@@ -1316,7 +1535,7 @@ function openPostView(p){
      say("Comment removed.");
    }
  };
- o.onclick=e=>{if(e.target===o||e.target.dataset.x!==undefined)o.remove();if(e.target.classList.contains("tag")){$("q").value=e.target.textContent;nav("home");renderGallery();o.remove()}};
+ o.onclick=e=>{if(e.target===o||e.target.closest("[data-x]"))o.remove();if(e.target.classList.contains("tag")){$("q").value=e.target.textContent;nav("home");renderGallery();o.remove()}};
 
  $$("#pvFollowBtn")?.addEventListener("click", async e => {
    e.stopPropagation();
@@ -1444,11 +1663,11 @@ function openPostView(p){
    };
    $$("#ed").onclick=()=>dlg("Edit post",`<label class="composer-label" for="ec">Caption</label><div class="tag-editor"><div class="tag-highlight" aria-hidden="true"></div><textarea class="in hashtag-input" id="ec" rows="3">${esc(p.caption||"")}</textarea></div><label class="composer-label" for="et">Topics</label><div class="tag-editor"><div class="tag-highlight" aria-hidden="true"></div><input class="in hashtag-input" id="et" value="${esc(cleanTags||"")}"></div>`,"Save",async d=>{
      const caption=d.querySelector("#ec").value.trim(),tagsInput=normTags(d.querySelector("#et").value);
-     const albumMatch=(p.tags||"").match(/__album:[^_\s]+__/);
+     const albumMatch=(p.tags||"").match(/__album:[^_s]+__/);
      const finalTags=albumMatch ? (tagsInput ? `${tagsInput} ${albumMatch[0]}` : albumMatch[0]) : tagsInput;
      await updateDoc(doc(db,"posts",p.id),{caption,tags:finalTags});
      p.caption=caption;p.tags=finalTags;
-     if($$("#cap"))$$("#cap").textContent=caption;
+     if($$("#cap")){$$("#cap").textContent=caption;$$("#cap").closest(".pv-caption-box")?.classList.remove("hide");}
      const updatedRaw=tagsInput.split(/[\s,]+/).filter(Boolean);
      if($$("#tg"))$$("#tg").innerHTML=updatedRaw.map(t=>`<button type="button" class="pv-tag-btn tag">${esc(t.startsWith("#")?t:"#"+t)}</button>`).join("");
      renderGallery();
@@ -1458,9 +1677,50 @@ function openPostView(p){
 
 const normTags=s=>s.split(/[\s,]+/).filter(Boolean).map(t=>t[0]=="#"?t:"#"+t).join(" ");
 
+async function compressImage(file, maxBytes = 5 * 1024 * 1024) {
+  if (!file || !file.type || !file.type.startsWith("image/")) return file;
+  if (file.size <= maxBytes) return file;
+  try {
+    const bmp = await createImageBitmap(file);
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    const dims = [2048, 1600, 1280];
+    const qualities = [0.86, 0.76, 0.65, 0.52];
+    let bestBlob = null;
+
+    for (const maxDim of dims) {
+      const scale = Math.min(1, maxDim / Math.max(bmp.width, bmp.height));
+      canvas.width = Math.max(1, Math.round(bmp.width * scale));
+      canvas.height = Math.max(1, Math.round(bmp.height * scale));
+      ctx.fillStyle = "#000000";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+
+      for (const q of qualities) {
+        const blob = await new Promise(r => canvas.toBlob(r, "image/jpeg", q));
+        if (!blob) continue;
+        if (!bestBlob || blob.size < bestBlob.size) bestBlob = blob;
+        if (blob.size <= maxBytes) {
+          bmp.close?.();
+          const base = (file.name || "image").replace(/\.[^.]+$/, "");
+          return new File([blob], base + ".jpg", { type: "image/jpeg" });
+        }
+      }
+    }
+    bmp.close?.();
+    if (bestBlob && bestBlob.size < file.size) {
+      const base = (file.name || "image").replace(/\.[^.]+$/, "");
+      return new File([bestBlob], base + ".jpg", { type: "image/jpeg" });
+    }
+  } catch (e) {
+    console.warn("Image compression skipped:", e);
+  }
+  return file;
+}
+
 async function compressVideo(file, onProgress) {
-  if (!file || !file.type.startsWith("video/")) return file;
-  if (file.size <= 2.5 * 1024 * 1024) return file;
+  if (!file || (!file.type.startsWith("video/") && !/\.(mp4|mov|webm|mkv|m4v|avi)$/i.test(file.name || ""))) return file;
+  if (file.size <= 5 * 1024 * 1024) return file;
   if (typeof MediaRecorder === "undefined") return file;
 
   return new Promise((resolve) => {
@@ -1618,6 +1878,7 @@ function openUpload(){
   let modeType="single"; // "single" or "multi"
   let filesList=[];      // Array of File objects (max 10)
   let activePreviewIdx=0;
+  let mediaSource="";
 
   const dialog=dlg("Create a post",`
     <div class="post-composer">
@@ -1636,12 +1897,17 @@ function openUpload(){
       <!-- File Drop / Picker Area -->
       <label class="upload-drop" for="uf" id="uDropZone">
         <input class="in" id="uf" type="file" multiple accept="image/*,video/*,.mp4,.mov,.webm,.mkv">
-        <span class="upload-icon">${IC.plus}</span>
+        <span class="upload-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg></span>
         <b id="uDropTitle">Choose photo or video</b>
-        <small id="uDropSub">JPG, PNG, WEBP, MP4, MOV · up to 25 MB</small>
+        <small id="uDropSub">JPG, PNG, WEBP, MP4 <span class="desktop-only-hint">· Paste (Ctrl+V) or Drop</span></small>
         <img class="upload-preview hide" id="uMainPreview" alt="Selected preview">
         <video class="upload-preview hide" id="uMainVideoPreview" playsinline muted autoplay loop></video>
       </label>
+
+      <button type="button" class="upload-paste-btn" id="uPasteBtn">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
+        <span>Paste Copied Image (Ctrl+V)</span>
+      </button>
 
       <!-- Thumbnails Strip (shown when photos selected) -->
       <div class="upload-thumbs-container hide" id="uThumbsWrap">
@@ -1658,15 +1924,42 @@ function openUpload(){
       <label class="composer-label" for="uc">Caption</label>
       <div class="tag-editor">
         <div class="tag-highlight" aria-hidden="true"></div>
-        <textarea class="in hashtag-input" id="uc" rows="3" placeholder="Write a caption... Add #hashtags"></textarea>
+        <textarea class="in hashtag-input" id="uc" rows="2" placeholder="Write a caption... Add #hashtags"></textarea>
       </div>
 
       <label class="composer-label" for="ut">Topics</label>
       <div class="tag-editor">
         <div class="tag-highlight" aria-hidden="true"></div>
-        <input class="in hashtag-input" id="ut" placeholder="#nature #art #travel">
+        <input class="in hashtag-input" id="ut" placeholder="Type topics (auto-tagged with #)">
       </div>
-      <small class="composer-hint">Hashtags are highlighted as you type.</small>
+      <div class="tag-suggestions-wrap hide" id="uTagSuggestions" aria-label="Suggested hashtags"></div>
+
+      <label class="composer-label">Content Source</label>
+      <div class="upload-source-pills" id="uSourcePills">
+        <button type="button" class="source-pill" data-src="original">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+          <span>Original</span>
+        </button>
+        <button type="button" class="source-pill" data-src="ai">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 4.5L18.5 9l-4.6 1.5L12 15l-1.9-4.5L5.5 9l4.6-1.5L12 3z"/><path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9L19 15z"/></svg>
+          <span>AI Created</span>
+        </button>
+        <button type="button" class="source-pill" data-src="pinterest">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 0 0-3.5 19.37c-.1-.83-.18-2.1.04-3 .2-.82 1.25-5.3 1.25-5.3s-.32-.64-.32-1.58c0-1.48.86-2.58 1.93-2.58.91 0 1.35.68 1.35 1.5 0 .91-.58 2.28-.88 3.55-.25 1.06.53 1.92 1.57 1.92 1.89 0 3.34-1.99 3.34-4.86 0-2.54-1.83-4.32-4.44-4.32-3.02 0-4.8 2.27-4.8 4.61 0 .91.35 1.89.79 2.42.09.11.1.2.07.31-.08.33-.26 1.06-.3 1.21-.05.2-.16.24-.37.14-1.38-.64-2.24-2.66-2.24-4.28 0-3.49 2.53-6.69 7.3-6.69 3.83 0 6.81 2.73 6.81 6.38 0 3.81-2.4 6.87-5.73 6.87-1.12 0-2.17-.58-2.53-1.27l-.69 2.63c-.25.96-.92 2.16-1.37 2.89A10 10 0 1 0 12 2z"/></svg>
+          <span>Pinterest</span>
+        </button>
+        <button type="button" class="source-pill" data-src="google">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+          <span>Google / Web</span>
+        </button>
+        <button type="button" class="source-pill" data-src="other">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
+          <span>Other</span>
+        </button>
+      </div>
+      <div class="upload-source-link-wrap hide" id="uSourceLinkWrap">
+        <input class="in" id="uSourceLink" type="url" placeholder="Paste original source link (optional)">
+      </div>
 
       <!-- Real-time Upload Progress Bar -->
       <div class="upload-progress-wrap hide" id="uProgWrap">
@@ -1682,12 +1975,26 @@ function openUpload(){
     </div>
   `,`Share post`,async d=>{
     if(!filesList.length){say("Choose at least one photo or video.");return false}
+    if(!mediaSource){say("Please select a Content Source.");return false}
     for(const f of filesList){
       if(f.size > 25e6){say(`"${f.name}" is over 25MB. Please choose a smaller file.`);return false}
     }
 
-    const caption=d.querySelector("#uc").value.trim();
-    const tags=normTags(d.querySelector("#ut").value);
+    const rawCap=d.querySelector("#uc").value.trim();
+    const srcLink=(d.querySelector("#uSourceLink")?.value || "").trim();
+    const caption=(srcLink && (mediaSource === "pinterest" || mediaSource === "google" || mediaSource === "other"))
+      ? (rawCap ? `${rawCap}\nSource: ${srcLink}` : `Source: ${srcLink}`)
+      : rawCap;
+    let tags=normTags(d.querySelector("#ut").value);
+    const srcTag = "#" + mediaSource;
+    if (!new RegExp(srcTag + "\\b", "i").test(tags)) {
+      tags = (tags ? tags + " " + srcTag : srcTag).trim();
+    }
+    const isVidFile = f => (f.type && f.type.startsWith("video/")) || /\.(mp4|mov|webm|mkv|m4v|avi)$/i.test(f.name || "");
+    const hasVideo = filesList.some(isVidFile);
+    if (hasVideo && !tags.includes("#reel")) {
+      tags = (tags ? tags + " #reel" : "#reel").trim();
+    }
     const okBtn=d.querySelector("[data-ok]");
     const cancelBtn=d.querySelector("[data-x]");
 
@@ -1702,26 +2009,40 @@ function openUpload(){
     if(cancelBtn) cancelBtn.style.display = "none";
 
     try{
-      // Auto-compress large videos (> 2.5MB) before upload
+      // Auto-compress any image or video over 5MB before upload
       for (let i = 0; i < filesList.length; i++) {
         const f = filesList[i];
-        if (f.type && f.type.startsWith("video/") && f.size > 2.5 * 1024 * 1024) {
+        if (f.size > 5 * 1024 * 1024) {
           const mbSize = (f.size / (1024 * 1024)).toFixed(1);
-          if (progStatus) progStatus.textContent = `Optimizing video (${mbSize} MB)…`;
-          if (progDetail) progDetail.textContent = `Compressing video for faster upload`;
-          if (okBtn) okBtn.textContent = `Compressing…`;
-          try {
-            const comp = await compressVideo(f, (pct) => {
-              if (progBar) progBar.style.width = pct + "%";
-              if (progPercent) progPercent.textContent = pct + "%";
-            });
-            if (comp && comp.size < f.size) {
-              const savedPct = Math.round((1 - comp.size / f.size) * 100);
-              console.log(`Video compressed from ${mbSize}MB to ${(comp.size / (1024*1024)).toFixed(1)}MB (${savedPct}% saved)`);
-              filesList[i] = comp;
+          if (isVidFile(f)) {
+            if (progStatus) progStatus.textContent = `Compressing video (${mbSize} MB)…`;
+            if (progDetail) progDetail.textContent = `Reducing video size under 5 MB`;
+            if (okBtn) okBtn.textContent = `Compressing…`;
+            try {
+              const comp = await compressVideo(f, (pct) => {
+                if (progBar) progBar.style.width = pct + "%";
+                if (progPercent) progPercent.textContent = pct + "%";
+              });
+              if (comp && comp.size < f.size) {
+                filesList[i] = comp;
+              }
+            } catch (e) {
+              console.warn("Video compression skipped:", e);
             }
-          } catch(e) {
-            console.warn("Video compression skipped:", e);
+          } else if (f.type && f.type.startsWith("image/")) {
+            if (progStatus) progStatus.textContent = `Compressing image (${mbSize} MB)…`;
+            if (progDetail) progDetail.textContent = `Optimizing image size under 5 MB`;
+            if (okBtn) okBtn.textContent = `Compressing…`;
+            if (progBar) progBar.style.width = "50%";
+            if (progPercent) progPercent.textContent = "50%";
+            try {
+              const compImg = await compressImage(f, 5 * 1024 * 1024);
+              if (compImg && compImg.size < f.size) {
+                filesList[i] = compImg;
+              }
+            } catch (e) {
+              console.warn("Image compression skipped:", e);
+            }
           }
         }
       }
@@ -1748,8 +2069,14 @@ function openUpload(){
         }
       });
 
-      say(filesList.length > 1 ? `Carousel of ${filesList.length} items uploaded ✓` : "Post uploaded ✓");
-      await loadImages();
+      if (hasVideo) {
+        say("Video uploaded to Reels ✓");
+        await loadImages();
+        switchToReels();
+      } else {
+        say(filesList.length > 1 ? `Carousel of ${filesList.length} items uploaded ✓` : "Post uploaded ✓");
+        await loadImages();
+      }
     }catch(err){
       if(progWrap) progWrap.classList.add("hide");
       if(okBtn) okBtn.removeAttribute("disabled");
@@ -1757,6 +2084,21 @@ function openUpload(){
       throw err;
     }
   });
+
+  const sheetEl = dialog.querySelector(".sheet");
+  if (sheetEl) {
+    const oldH3 = sheetEl.querySelector(":scope > h3");
+    if (oldH3) {
+      const hdr = document.createElement("div");
+      hdr.className = "composer-modal-header";
+      hdr.innerHTML = `<h3>Create a post</h3><button type="button" class="ib composer-close-btn" data-x aria-label="Close">${IC.x}</button>`;
+      oldH3.replaceWith(hdr);
+    }
+    const cancelBtnFooter = sheetEl.querySelector(":scope > .row > button[data-x]");
+    if (cancelBtnFooter) cancelBtnFooter.remove();
+    const okBtnFooter = sheetEl.querySelector(":scope > .row > [data-ok]");
+    if (okBtnFooter) okBtnFooter.classList.add("composer-share-btn");
+  }
 
   const dropZone=dialog.querySelector("#uDropZone");
   const dropTitle=dialog.querySelector("#uDropTitle");
@@ -1769,6 +2111,30 @@ function openUpload(){
   const counterBadge=dialog.querySelector("#uCounterBadge");
   const btnSingle=dialog.querySelector("#umSingle");
   const btnMulti=dialog.querySelector("#umMulti");
+  const shareBtn=dialog.querySelector("[data-ok]");
+  const sourceLinkWrap=dialog.querySelector("#uSourceLinkWrap");
+
+  function syncUploadReady(){
+    if(!shareBtn) return;
+    const readyToShare = filesList.length > 0 && Boolean(mediaSource);
+    shareBtn.disabled = !readyToShare;
+    shareBtn.classList.toggle("upload-locked", !readyToShare);
+  }
+
+  function setSource(src){
+    mediaSource = src || "";
+    dialog.querySelectorAll("#uSourcePills .source-pill").forEach(b => b.classList.toggle("on", b.getAttribute("data-src") === mediaSource));
+    if(sourceLinkWrap){
+      const showLink = mediaSource === "pinterest" || mediaSource === "google" || mediaSource === "other";
+      sourceLinkWrap.classList.toggle("hide", !showLink);
+    }
+    syncUploadReady();
+  }
+
+  dialog.querySelectorAll("#uSourcePills .source-pill").forEach(btn => {
+    btn.onclick = () => setSource(btn.getAttribute("data-src"));
+  });
+  syncUploadReady();
 
   const mainVideoPreview=dialog.querySelector("#uMainVideoPreview");
 
@@ -1795,7 +2161,7 @@ function openUpload(){
   btnMulti.onclick=()=>setUploadMode("multi");
 
   function addFiles(newFiles){
-    const list=Array.from(newFiles).filter(f=>f.type.startsWith("image/") || f.type.startsWith("video/"));
+    const list=Array.from(newFiles).filter(f=>f.type.startsWith("image/") || f.type.startsWith("video/") || /\.(mp4|mov|webm|mkv|m4v|avi)$/i.test(f.name || ""));
     if(!list.length) return;
     if(modeType === "single"){
       filesList=[list[0]];
@@ -1811,10 +2177,17 @@ function openUpload(){
       }
       filesList=[...filesList, ...list.slice(0, remaining)];
     }
+    const fname = (list[0]?.name || "").toLowerCase();
+    if (fname.includes("pin") || fname.includes("pinterest")) {
+      setSource("pinterest");
+    } else if (fname.startsWith("download") || fname.startsWith("images")) {
+      setSource("google");
+    }
     renderThumbs();
   }
 
   function renderThumbs(){
+    syncUploadReady();
     if(!filesList.length){
       dropZone.classList.remove("has-image");
       mainPreview.classList.add("hide");
@@ -1905,13 +2278,228 @@ function openUpload(){
     }
   });
 
+  // Clipboard Paste support (Ctrl+V anywhere in modal for PC + Paste button for PC/Mobile)
+  const handleClipboardItems = (items) => {
+    const pasted = [];
+    for (const item of items || []) {
+      if (item.type && (item.type.startsWith("image/") || item.type.startsWith("video/"))) {
+        const blob = item.getAsFile ? item.getAsFile() : item;
+        if (blob) {
+          const ext = (blob.type.split("/")[1] || "png").replace("jpeg", "jpg");
+          const namedFile = blob.name && !/^image\./i.test(blob.name)
+            ? blob
+            : new File([blob], `pasted_${Date.now()}_${pasted.length}.${ext}`, { type: blob.type || "image/png" });
+          pasted.push(namedFile);
+        }
+      }
+    }
+    return pasted;
+  };
+
+  const onPaste = e => {
+    if (!document.body.contains(dialog)) {
+      document.removeEventListener("paste", onPaste);
+      return;
+    }
+    const items = e.clipboardData?.items;
+    const filesFromItems = handleClipboardItems(items);
+    const filesDirect = !filesFromItems.length && e.clipboardData?.files?.length
+      ? Array.from(e.clipboardData.files).filter(f => f.type.startsWith("image/") || f.type.startsWith("video/"))
+      : [];
+    const media = filesFromItems.length ? filesFromItems : filesDirect;
+    if (media.length) {
+      e.preventDefault();
+      addFiles(media);
+      say("Image pasted from clipboard ✓");
+    }
+  };
+  document.addEventListener("paste", onPaste);
+
+  const pasteBtn = dialog.querySelector("#uPasteBtn");
+  if (pasteBtn) {
+    pasteBtn.onclick = async () => {
+      if (!navigator.clipboard || !navigator.clipboard.read) {
+        say("Press Ctrl+V to paste a copied image, or choose a file.");
+        return;
+      }
+      try {
+        const clipItems = await navigator.clipboard.read();
+        const pasted = [];
+        for (const cItem of clipItems) {
+          const imgType = cItem.types.find(t => t.startsWith("image/"));
+          if (imgType) {
+            const blob = await cItem.getType(imgType);
+            const ext = (imgType.split("/")[1] || "png").replace("jpeg", "jpg");
+            pasted.push(new File([blob], `pasted_${Date.now()}.${ext}`, { type: imgType }));
+          }
+        }
+        if (pasted.length) {
+          addFiles(pasted);
+          say("Image pasted ✓");
+        } else {
+          say("No image found in clipboard. Copy an image first.");
+        }
+      } catch (err) {
+        say("Press Ctrl+V to paste a copied image.");
+      }
+    };
+  }
+
+  // Drag & Drop support for PC
+  if (dropZone) {
+    dropZone.addEventListener("dragover", e => { e.preventDefault(); dropZone.classList.add("drag-over"); });
+    dropZone.addEventListener("dragleave", () => dropZone.classList.remove("drag-over"));
+    dropZone.addEventListener("drop", e => {
+      e.preventDefault();
+      dropZone.classList.remove("drag-over");
+      if (e.dataTransfer?.files?.length) addFiles(e.dataTransfer.files);
+    });
+  }
+
   setupHashtagFields(dialog);
+
+  // Live Wikipedia OpenSearch + Visual Photography Tag Booster
+  const topicsInput = dialog.querySelector("#ut");
+  const suggestWrap = dialog.querySelector("#uTagSuggestions");
+  let tagDebounceTimer = null;
+  let lastQueriedWord = "";
+  let currentSuggestions = [];
+
+  const VISUAL_TAG_DICT = {
+    car: ["supercar", "carphotography", "sportscar", "automotive", "jdm", "dreamcar"],
+    cars: ["supercar", "carphotography", "sportscar", "automotive", "jdm", "dreamcar"],
+    porsche: ["porsche911", "porschegt3", "supercar", "carspotting", "luxurycars"],
+    mountain: ["mountainview", "peak", "landscapephotography", "wanderlust", "nature"],
+    mountains: ["mountainview", "peak", "landscapephotography", "wanderlust", "nature"],
+    nature: ["naturephotography", "earthpix", "greenery", "outdoors", "scenic"],
+    sunset: ["goldenhour", "sunsetlovers", "skyphotography", "eveningvibes", "horizon"],
+    red: ["redvibes", "coloraesthetic", "minimal", "darktheme"],
+    blue: ["bluetones", "coloraesthetic", "minimal", "darktheme"],
+    black: ["amoled", "coloraesthetic", "minimal", "darktheme"],
+    headphones: ["techsetup", "audiophile", "desksetup", "gadgets", "minimaltech"],
+    tech: ["techsetup", "audiophile", "desksetup", "gadgets", "minimaltech"],
+    anime: ["animeart", "digitalart", "illustration", "aestheticart", "characterdesign"],
+    art: ["animeart", "digitalart", "illustration", "aestheticart", "characterdesign"],
+    architecture: ["modernarchitecture", "cityscape", "interior", "urbanphotography", "minimaldesign"],
+    wallpaper: ["4kwallpaper", "lockscreen", "aestheticwallpaper", "background", "hdwallpaper"]
+  };
+
+  function getVisualTags(word) {
+    if (VISUAL_TAG_DICT[word]) return VISUAL_TAG_DICT[word];
+    for (const key of Object.keys(VISUAL_TAG_DICT)) {
+      if (key.startsWith(word) || word.startsWith(key)) return VISUAL_TAG_DICT[key];
+    }
+    return [];
+  }
+
+  function formatWikiTag(title) {
+    const cleaned = String(title || "")
+      .replace(/\([^)]*\)|\[[^\]]*\]/g, "")
+      .replace(/[^a-zA-Z0-9\s]/g, "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "");
+    return cleaned.slice(0, 24);
+  }
+
+  function getExistingTagsSet() {
+    return new Set(
+      (topicsInput?.value || "")
+        .split(/[\s,]+/)
+        .map(t => t.replace(/^#/, "").trim().toLowerCase())
+        .filter(Boolean)
+    );
+  }
+
+  function renderTagSuggestions() {
+    if (!suggestWrap) return;
+    if (!currentSuggestions.length) {
+      suggestWrap.classList.add("hide");
+      suggestWrap.innerHTML = "";
+      return;
+    }
+    const existing = getExistingTagsSet();
+    suggestWrap.classList.remove("hide");
+    suggestWrap.innerHTML = currentSuggestions.map(tag => {
+      const isAdded = existing.has(tag);
+      return `<button type="button" class="tag-suggest-chip ${isAdded ? 'added' : ''}" data-suggest-tag="${esc(tag)}">#${esc(tag)}</button>`;
+    }).join("");
+
+    suggestWrap.querySelectorAll(".tag-suggest-chip").forEach(chip => {
+      chip.onclick = () => {
+        const tag = chip.getAttribute("data-suggest-tag");
+        if (!tag || !topicsInput) return;
+        const existingNow = getExistingTagsSet();
+        if (existingNow.has(tag)) return;
+
+        const val = topicsInput.value;
+        if (/\s$/.test(val) || !val.trim()) {
+          topicsInput.value = val + "#" + tag + " ";
+        } else {
+          topicsInput.value = val.replace(/(^|[\s,])([^\s,]+)$/, "$1#" + tag + " ");
+        }
+        topicsInput.dispatchEvent(new Event("input", { bubbles: true }));
+        topicsInput.focus();
+        renderTagSuggestions();
+      };
+    });
+  }
+
+  if (topicsInput && suggestWrap) {
+    topicsInput.addEventListener("input", () => {
+      renderTagSuggestions();
+      clearTimeout(tagDebounceTimer);
+      const val = topicsInput.value;
+      const match = val.match(/(?:^|[\s,])#?([^\s,]+)$/);
+      const rawWord = match ? match[1].trim().toLowerCase().replace(/[^a-z0-9_]/g, "") : "";
+      if (!rawWord || rawWord.length < 2) {
+        lastQueriedWord = "";
+        currentSuggestions = [];
+        renderTagSuggestions();
+        return;
+      }
+      if (rawWord === lastQueriedWord) return;
+      tagDebounceTimer = setTimeout(async () => {
+        lastQueriedWord = rawWord;
+        const visualMatches = getVisualTags(rawWord);
+        let wikiTags = [];
+        try {
+          const res = await fetch(`https://en.wikipedia.org/w/api.php?action=opensearch&format=json&origin=*&search=${encodeURIComponent(rawWord)}&limit=8`);
+          if (res.ok) {
+            const data = await res.json();
+            const titles = Array.isArray(data?.[1]) ? data[1] : [];
+            wikiTags = titles
+              .filter(t => !/(list of|disambiguation|history of|index of)/i.test(t))
+              .map(formatWikiTag)
+              .filter(t => t.length >= 2);
+          }
+        } catch {
+          // Fallback to visual tags if offline
+        }
+        const seen = new Set();
+        const merged = [rawWord, ...visualMatches, ...wikiTags].filter(t => {
+          if (!t || t.length < 2 || seen.has(t)) return false;
+          seen.add(t);
+          return true;
+        }).slice(0, 12);
+        currentSuggestions = merged;
+        renderTagSuggestions();
+      }, 250);
+    });
+  }
 }
 
 function setupHashtagFields(root){
  root.querySelectorAll(".hashtag-input").forEach(input=>{
   const layer=input.parentElement.querySelector(".tag-highlight");
-  const paint=()=>{layer.innerHTML=esc(input.value).replace(/(^|\s)(#[\p{L}\p{N}_]+)/gu,'$1<span>$2</span>')+"\n";layer.scrollTop=input.scrollTop};
+  const isTopics = input.id === "ut" || input.id === "et";
+  const paint=()=>{
+    const formatted = isTopics
+      ? esc(input.value).replace(/(^|[\s,])(#?[\p{L}\p{N}_]+)/gu,'$1<span>$2</span>')
+      : esc(input.value).replace(/(^|\s)(#[\p{L}\p{N}_]+)/gu,'$1<span>$2</span>');
+    layer.innerHTML=formatted+"\n";
+    layer.scrollTop=input.scrollTop;
+  };
   input.addEventListener("input",paint);input.addEventListener("scroll",()=>{layer.scrollTop=input.scrollTop;layer.scrollLeft=input.scrollLeft});paint();
  });
 }
@@ -2002,6 +2590,8 @@ async function openProfile(targetUid){
   }
 
   const userPosts = posts.filter(p => p.uid == currentUid);
+  const userPhotos = userPosts.filter(p => isPhotoPost(p));
+  const userReels = userPosts.filter(p => isVideoPost(p));
   const followersList = user.followers || [];
   const followingList = isOther ? (user.following || []) : Array.from(getFollowing());
 
@@ -2014,47 +2604,53 @@ async function openProfile(targetUid){
           </button>
         </div>
       ` : ""}
-      <div class="row">
-        ${av(user.username, user.profilePic, "l")}
-        <div style="min-width:0">
-          <h3>@${esc(user.username)} ${isDevUser(user) || user.username === "ishhhh" ? verifiedBadgeHtml(true) : ""}</h3>
-          ${user.email ? `<div style="color:var(--m);overflow:hidden;text-overflow:ellipsis">${esc(user.email)}</div>` : ""}
-          ${(isDevUser(user) || user.username === "ishhhh") ? `<div style="margin-top:6px;display:flex;align-items:center;gap:6px"><span class="dev-tag-pill" style="font-size:11px;padding:3px 8px">👑 Master Developer</span><span style="font-size:12px;color:#0095f6;font-weight:700">✓ Verified</span></div>` : ""}
+      <div class="profile-head-bar">
+        <div class="profile-name-line">
+          <h3>@${esc(user.username)} ${isVerifiedUser(user) ? verifiedBadgeHtml(isDevUser(user)) : ""}</h3>
+          ${(isDevUser(user) || user.username === "ishhhh") ? `<div class="profile-dev-badges"><span class="dev-tag-pill">Master Developer</span><span class="dev-verified-text">✓ Verified</span></div>` : (isVerifiedUser(user) ? `<div class="profile-dev-badges"><span class="dev-verified-text">✓ Verified Account</span></div>` : "")}
         </div>
+        ${!isOther ? `<button type="button" class="profile-settings-pill" id="pSettingsBtn" title="Settings" aria-label="Settings"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span>Settings</span></button>` : ""}
       </div>
 
-      <!-- Instagram Stats Row: Posts | Followers | Following -->
-      <div class="ig-stats">
-        <div class="stat-box">
-          <span class="stat-num">${userPosts.length}</span>
-          <span class="stat-label">Posts</span>
-        </div>
-        <div class="stat-box clickable" id="pStatFollowers">
-          <span class="stat-num" id="pFollowersCount">${followersList.length}</span>
-          <span class="stat-label">Followers</span>
-        </div>
-        <div class="stat-box clickable" id="pStatFollowing">
-          <span class="stat-num" id="pFollowingCount">${followingList.length}</span>
-          <span class="stat-label">Following</span>
+      <div class="profile-top-row">
+        ${av(user.username, user.profilePic, "l")}
+        <div class="profile-identity">
+          <div class="ig-stats">
+            <div class="stat-box">
+              <span class="stat-num">${userPosts.length}</span>
+              <span class="stat-label">Posts</span>
+            </div>
+            <div class="stat-box clickable" id="pStatFollowers">
+              <span class="stat-num" id="pFollowersCount">${followersList.length}</span>
+              <span class="stat-label">Followers</span>
+            </div>
+            <div class="stat-box clickable" id="pStatFollowing">
+              <span class="stat-num" id="pFollowingCount">${followingList.length}</span>
+              <span class="stat-label">Following</span>
+            </div>
+          </div>
         </div>
       </div>
 
       ${isOther ? `
-        <div class="profile-actions" style="margin-top:14px;display:flex;gap:10px">
+        <div class="profile-actions">
           <button type="button" class="btn-follow big ${isFollowing(targetUid) ? 'following' : ''}" id="pFollowBtn" style="flex:1">
             <span>${isFollowing(targetUid) ? 'Following' : 'Follow'}</span>
           </button>
           <button type="button" class="btn pri" id="pMsgBtn" style="flex:1">
             <span>Message</span>
           </button>
+          ${isDevUser(me) && !isDevUser(user) ? `
+            <button type="button" class="btn" id="pDevVerifyBtn" style="flex:1 1 100%;border-color:#0095f6;color:#0095f6">
+              <span>${isVerifiedUser(user) ? 'Remove Verified Badge' : 'Make User Verified ✓'}</span>
+            </button>
+          ` : ""}
         </div>
       ` : `
         <div class="profile-actions">
-          <button class="btn" id="cu">Change username</button>
-          <button class="btn" id="cp">Change photo</button>
-          ${me.pw ? '<button class="btn" id="cw">Change password</button>' : ""}
+          <button type="button" class="btn" id="cu"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg><span>Edit Username</span></button>
+          <button type="button" class="btn" id="cp"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg><span>Edit Photo</span></button>
         </div>
-        <button class="btn pri wide" id="lo"><span>Logout</span><i>${IC.out}</i></button>
       `}
     </div>
 
@@ -2088,61 +2684,373 @@ async function openProfile(targetUid){
     });
 
     $("pMsgBtn")?.addEventListener("click", () => openConv(targetUid));
-  } else {
-    $("lo").onclick = async () => {
-      try {
-        localStorage.removeItem("ishnt_dev_session");
-        localStorage.removeItem("ishnt_dev_user");
-      } catch(e) {}
-      await signOut(auth);
-      me = null;
-      watching.clear();
-      chats.clear();
-      $("panel").classList.remove("open");
-      $("profile").classList.add("hide");
-      $("home").classList.remove("hide");
-      ready = false;
-      $("app").classList.add("hide");
-      $("auth").classList.remove("hide");
-      setMode("login");
-    };
-    $("cp").onclick = () => $("fDp").click();
-    $("cw") && ($("cw").onclick = () => dlg("Change password", `<input class="in" id="p0" type="password" placeholder="Current password"><input class="in" id="p1" type="password" placeholder="New password (min 6 characters)"><input class="in" id="p2" type="password" placeholder="Confirm new password">`, "Update", async o => {
-      const a = o.querySelector("#p0").value, b = o.querySelector("#p1").value, c = o.querySelector("#p2").value, u = auth.currentUser;
-      if (!a || !b) { say("Fill in all fields."); return false; }
-      if (b.length < 6) { say("New password must be at least 6 characters."); return false; }
-      if (b !== c) { say("Passwords don't match."); return false; }
-      if (a === b) { say("New password must be different."); return false; }
-      try { await reauthenticateWithCredential(u, EmailAuthProvider.credential(u.email, a)); } catch (e) { if (/invalid-credential|wrong-password/.test(e.code || "")) { say("Current password is incorrect."); return false; } throw e; }
-      await updatePassword(u, b); say("Password changed!");
-    }));
-    $("cu").onclick = () => dlg("Change username", `<input class="in" id="nn" placeholder="new username" autocapitalize="none"><div id="ne" style="color:var(--rd);font-size:13px"></div>`, "Change", async o => {
-      const n = o.querySelector("#nn").value.trim().toLowerCase(), er = o.querySelector("#ne");
-      if (!okName(n)) { er.textContent = "3-20 characters: a-z, 0-9, _ ."; return false; }
-      if (n == me.username) return;
-      if (!(await nameFree(n))) { er.textContent = "That username is taken."; return false; }
-      await setDoc(doc(db, "usernames", n), { uid: me.uid, email: me.email || "", createdAt: serverTimestamp() });
-      try { await deleteDoc(doc(db, "usernames", me.username)); } catch { }
-      await updateDoc(doc(db, "users", me.uid), { username: n });
-      me.username = n;
-      await getUserProfile(me.uid, true);
-      say("Username updated ✓");
-      openProfile();
+    $("pDevVerifyBtn")?.addEventListener("click", async () => {
+      const nextVal = !isVerifiedUser(user);
+      await setUserVerified(targetUid, user.username, nextVal);
+      say(nextVal ? `@${user.username} is now Verified ✓` : `Removed verified badge from @${user.username}`);
+      openProfile(targetUid);
     });
+  } else {
+    $("cp").onclick = () => $("fDp").click();
+    $("pSettingsBtn")?.addEventListener("click", openSettings);
+    $("cu").onclick = promptChangeUsername;
   }
+}
+
+async function performLogout() {
+  try {
+    localStorage.removeItem("ishnt_dev_session");
+    localStorage.removeItem("ishnt_dev_user");
+  } catch (e) {}
+  try { await signOut(auth); } catch (e) {}
+  me = null;
+  watching.clear();
+  chats.clear();
+  $("panel").classList.remove("open");
+  $("profile").classList.add("hide");
+  $("home").classList.remove("hide");
+  ready = false;
+  $("app").classList.add("hide");
+  $("auth").classList.remove("hide");
+  setMode("login");
+}
+
+function promptChangePassword() {
+  dlg("Change password", `<input class="in" id="p0" type="password" placeholder="Current password"><input class="in" id="p1" type="password" placeholder="New password (min 6 characters)"><input class="in" id="p2" type="password" placeholder="Confirm new password">`, "Update", async o => {
+    const a = o.querySelector("#p0").value, b = o.querySelector("#p1").value, c = o.querySelector("#p2").value, u = auth.currentUser;
+    if (!a || !b) { say("Fill in all fields."); return false; }
+    if (b.length < 6) { say("New password must be at least 6 characters."); return false; }
+    if (b !== c) { say("Passwords don't match."); return false; }
+    if (a === b) { say("New password must be different."); return false; }
+    try { await reauthenticateWithCredential(u, EmailAuthProvider.credential(u.email, a)); } catch (e) { if (/invalid-credential|wrong-password/.test(e.code || "")) { say("Current password is incorrect."); return false; } throw e; }
+    await updatePassword(u, b);
+    say("Password changed!");
+  });
+}
+
+function promptChangeUsername() {
+  dlg("Change username", `<input class="in" id="nn" placeholder="new username" autocapitalize="none"><div id="ne" style="color:var(--rd);font-size:13px"></div>`, "Change", async o => {
+    const n = o.querySelector("#nn").value.trim().toLowerCase(), er = o.querySelector("#ne");
+    if (!okName(n)) { er.textContent = "3-20 characters: a-z, 0-9, _ ."; return false; }
+    if (n == me.username) return;
+    if (!(await nameFree(n))) { er.textContent = "That username is taken."; return false; }
+    await setDoc(doc(db, "usernames", n), { uid: me.uid, createdAt: serverTimestamp() });
+    try { await deleteDoc(doc(db, "usernames", me.username)); } catch {}
+    await updateDoc(doc(db, "users", me.uid), { username: n });
+    me.username = n;
+    await getUserProfile(me.uid, true);
+    say("Username updated ✓");
+    openProfile();
+  });
+}
+
+function performDeleteAccount() {
+  if (guest) { say("Guest accounts cannot be deleted."); return; }
+  const isDev = isDevUser(me) && me.uid === "dev_ishhhh_master";
+  const needsPw = me.pw && !isDev && auth.currentUser;
+  dlg("Delete Account", `
+    <div style="color:var(--m);font-size:13.5px;line-height:1.5;margin-bottom:8px">
+      <b style="color:var(--rd)">Warning:</b> This will permanently delete your account, profile, and all your uploaded posts. This action cannot be undone.
+    </div>
+    ${needsPw ? `<input class="in" id="delPass" type="password" placeholder="Enter your password to confirm">` : `<input class="in" id="delConfirm" placeholder="Type DELETE to confirm" autocapitalize="characters">`}
+  `, "Delete Forever", async o => {
+    if (needsPw) {
+      const pw = o.querySelector("#delPass")?.value;
+      if (!pw) { say("Enter your password."); return false; }
+      try {
+        await reauthenticateWithCredential(auth.currentUser, EmailAuthProvider.credential(auth.currentUser.email, pw));
+      } catch (e) {
+        say("Incorrect password.");
+        return false;
+      }
+    } else {
+      const txt = (o.querySelector("#delConfirm")?.value || "").trim().toUpperCase();
+      if (txt !== "DELETE") { say("Type DELETE to confirm."); return false; }
+    }
+
+    try {
+      const myPosts = posts.filter(p => p.uid === me.uid);
+      for (const p of myPosts) {
+        try { await fetch(W + "/delete/" + p.id, { method: "DELETE" }); } catch {}
+      }
+      posts = posts.filter(p => p.uid !== me.uid);
+
+      if (!isDev) {
+        try { await deleteDoc(doc(db, "usernames", me.username)); } catch {}
+        try { await deleteDoc(doc(db, "users", me.uid)); } catch {}
+        if (auth.currentUser) await deleteUser(auth.currentUser);
+      }
+
+      say("Account deleted permanently.");
+      await performLogout();
+    } catch (err) {
+      if (err?.code === "auth/requires-recent-login") {
+        say("Please log out and log back in before deleting your account.");
+      } else {
+        say("Failed to delete account: " + (err?.message || "Try again."));
+      }
+      return false;
+    }
+  });
+}
+
+function openSettings() {
+  if (guest) { say("Log in to access account settings."); return; }
+  const curTheme = document.documentElement.getAttribute("data-theme") || "amoled";
+  const o = document.createElement("div");
+  o.className = "ov";
+  o.innerHTML = `
+    <div class="sheet g settings-sheet">
+      <div class="settings-header">
+        <h3 class="settings-title-with-ic"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span>Settings</span></h3>
+        <button class="ib" data-x aria-label="Close">${IC.x}</button>
+      </div>
+
+      <div class="settings-user-banner">
+        ${av(me.username, me.profilePic, "m")}
+        <div class="settings-user-meta">
+          <b>@${esc(me.username)} ${isDevUser(me) ? verifiedBadgeHtml(true) : ""}</b>
+          <small>Privacy: Email hidden &amp; protected</small>
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <div class="settings-group-title">Account</div>
+        <button type="button" class="settings-row" id="setPhoto">
+          <span class="settings-label-ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg><span>Change Profile Photo</span></span>
+          <span class="settings-chevron">›</span>
+        </button>
+        <button type="button" class="settings-row" id="setUser">
+          <span class="settings-label-ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg><span>Change Username</span></span>
+          <span class="settings-chevron">›</span>
+        </button>
+        ${me.pw && !isDevUser(me) ? `
+          <button type="button" class="settings-row" id="setPass">
+            <span class="settings-label-ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg><span>Change Password</span></span>
+            <span class="settings-chevron">›</span>
+          </button>
+        ` : ""}
+      </div>
+
+      <div class="settings-group">
+        <div class="settings-group-title">Appearance &amp; Playback</div>
+        <div class="settings-row static">
+          <span class="settings-label-ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg><span>App Theme</span></span>
+          <div class="settings-theme-pills">
+            <button type="button" class="theme-pill ${curTheme === 'amoled' ? 'active' : ''}" data-set-theme="amoled">AMOLED</button>
+            <button type="button" class="theme-pill ${curTheme === 'midnight' ? 'active' : ''}" data-set-theme="midnight">Midnight</button>
+            <button type="button" class="theme-pill ${curTheme === 'light' ? 'active' : ''}" data-set-theme="light">Light</button>
+          </div>
+        </div>
+        <div class="settings-row static">
+          <span class="settings-label-ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg><span>Mute Reels by Default</span></span>
+          <label class="settings-switch">
+            <input type="checkbox" id="setMuteReels" ${window.reelsMuted ? "checked" : ""}>
+            <span class="settings-slider"></span>
+          </label>
+        </div>
+      </div>
+
+      ${isDevUser(me) ? `
+        <div class="settings-group">
+          <div class="settings-group-title">Developer Tools</div>
+          <button type="button" class="settings-row" id="setDevVerify">
+            <span class="settings-label-ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0095f6" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><span>Make User Verified</span></span>
+            <span class="settings-chevron">›</span>
+          </button>
+        </div>
+      ` : ""}
+
+      <div class="settings-group">
+        <div class="settings-group-title">Session &amp; Danger Zone</div>
+        <button type="button" class="settings-row" id="setLogout">
+          <span class="settings-label-ic">${IC.out}<span>Log Out</span></span>
+          <span class="settings-chevron">›</span>
+        </button>
+        <button type="button" class="settings-row danger" id="setDeleteAcc">
+          <span class="settings-label-ic">${IC.trash}<span>Delete Account</span></span>
+          <span class="settings-chevron">›</span>
+        </button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(o);
+  o.onclick = e => { if (e.target === o || e.target.closest("[data-x]")) o.remove(); };
+
+  o.querySelector("#setPhoto").onclick = () => { o.remove(); $("fDp").click(); };
+  o.querySelector("#setUser").onclick = () => { o.remove(); promptChangeUsername(); };
+  o.querySelector("#setPass")?.addEventListener("click", () => { o.remove(); promptChangePassword(); });
+
+  o.querySelectorAll("[data-set-theme]").forEach(btn => {
+    btn.onclick = () => {
+      const t = btn.getAttribute("data-set-theme");
+      if (window.setAppTheme) window.setAppTheme(t);
+      o.querySelectorAll("[data-set-theme]").forEach(b => b.classList.toggle("active", b === btn));
+      say("Theme updated ✓");
+    };
+  });
+
+  o.querySelector("#setMuteReels").onchange = e => {
+    window.reelsMuted = e.target.checked;
+    try { localStorage.setItem("ishnt_reels_muted", window.reelsMuted ? "1" : "0"); } catch {}
+    say(window.reelsMuted ? "Reels muted by default" : "Reels sound enabled by default");
+  };
+
+  o.querySelector("#setLogout").onclick = async () => {
+    o.remove();
+    await performLogout();
+  };
+
+  o.querySelector("#setDeleteAcc").onclick = () => {
+    o.remove();
+    performDeleteAccount();
+  };
+
+  o.querySelector("#setDevVerify")?.addEventListener("click", () => {
+    o.remove();
+    dlg("Make User Verified", `
+      <div style="color:var(--m);font-size:13px;margin-bottom:8px">Enter any username to grant or remove the blue verified badge (✓).</div>
+      <input class="in" id="devVerifyName" placeholder="e.g. iiiii" autocapitalize="none">
+    `, "Toggle Verified", async d => {
+      const uname = (d.querySelector("#devVerifyName")?.value || "").trim().replace(/^@/, "").toLowerCase();
+      if (!uname) { say("Enter a username."); return false; }
+      let targetUid = "";
+      let targetUser = null;
+      try {
+        const snap = await getDoc(doc(db, "usernames", uname));
+        if (snap.exists()) {
+          targetUid = snap.data().uid;
+          targetUser = await getUserProfile(targetUid, true);
+        }
+      } catch {}
+      const currentlyVerified = isVerifiedUser(targetUser || { uid: targetUid, username: uname });
+      const nextVal = !currentlyVerified;
+      await setUserVerified(targetUid, uname, nextVal);
+      say(nextVal ? `@${uname} is now Verified ✓` : `Removed verified badge from @${uname}`);
+      if (!$("profile")?.classList.contains("hide")) openProfile();
+      renderGallery();
+    });
+  });
 }
 $("fDp").onchange=async e=>{const f=e.target.files[0];e.target.value="";if(!f||guest||!canAct())return;say("Uploading photo…");try{const id=await upload(f,{caption:"__dp__",tags:"__dp__"});me.profilePic=imgUrl(id);await updateDoc(doc(db,"users",me.uid),{profilePic:me.profilePic});await getUserProfile(me.uid,true);say("Photo updated ✓");openProfile()}catch(x){say(errMsg(x))}};
 
-/* CHAT */
-function panelList(){curChat=null;unsubMsgs?.();$("panel").innerHTML=`<div class="ph"><b style="flex:1;font-size:18px">Chats</b><button class="ib" id="px" aria-label="Close">${IC.x}</button></div><div style="padding:10px"><input class="in" id="us" placeholder="Search users by username…" autocapitalize="none"></div><div id="ur" style="padding:0 10px"></div><div id="cl" style="flex:1;overflow:auto;padding:6px"></div>`;
- $("px").onclick=closePanel;let t;$("us").oninput=e=>{clearTimeout(t);t=setTimeout(()=>searchUsers(e.target.value.trim().toLowerCase()),300)};renderChatList()}
-async function searchUsers(q){const r=$("ur");if(!q){r.innerHTML="";return}try{const s=await onceDocs(query(collection(db,"usernames"),where(documentId(),">=",q),where(documentId(),"<=",q+"\uf8ff"),limit(8)));r.innerHTML="";const rows=s.filter(d=>d.data.uid!=me.uid);if(!rows.length)r.innerHTML='<div class="empty" style="padding:14px">No users found.</div>';
- for(const d of rows){const p=await getUserProfile(d.data.uid);const row=document.createElement("div");row.className="crow";row.innerHTML=`${av(d.id,p?.profilePic,"m")}<div class="tx"><div>@${esc(d.id)}</div></div>`;row.onclick=()=>openConv(d.data.uid);r.appendChild(row)}}catch{say("Search failed. Try again.")}}
-const onceDocs=q=>new Promise((res,rej)=>{const u=onSnapshot(q,s=>{u();res(s.docs.map(d=>({id:d.id,data:d.data()})))},e=>{u();rej(e)})});
-function renderChatList(){const el=$("cl");if(!el)return;const arr=[...chats.entries()].sort((a,b)=>ms(b[1].lastMessageTime)-ms(a[1].lastMessageTime));if(!arr.length){el.innerHTML='<div class="empty">No chats yet 💬<br>Search a username above to start chatting.</div>';return}
- el.innerHTML="";const s=seen();arr.forEach(([id,c])=>{const o=c.users.find(x=>x!=me.uid),row=document.createElement("div");row.className="crow";const unread=c.lastSender&&c.lastSender!=me.uid&&ms(c.lastMessageTime)>(s[id]||0);
- row.innerHTML=`<span data-a>${av(c.usernames?.[o],c.profilePics?.[o],"m")}</span><div class="tx"><div><b>${esc(c.usernames?.[o]||"user")}</b></div><div><small>${esc(c.lastMessage||"New chat")}</small></div></div>${unread?'<span class="ud"></span>':""}`;row.onclick=()=>openConv(o);el.appendChild(row);
- getUserProfile(o).then(u=>{if(u){row.querySelector("[data-a]").innerHTML=av(u.username,u.profilePic,"m");row.querySelector("b").textContent=u.username}})});}
+/* CHAT (WHATSAPP-STYLE) */
+let replyTarget = null;
+
+function formatChatTime(t) {
+  if (!t) return "";
+  const d = new Date(ms(t));
+  const now = new Date();
+  const isToday = d.toDateString() === now.toDateString();
+  const yest = new Date(now); yest.setDate(now.getDate() - 1);
+  if (isToday) return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  if (d.toDateString() === yest.toDateString()) return "Yesterday";
+  return d.toLocaleDateString([], { day: "numeric", month: "short" });
+}
+
+function formatDateDivider(d) {
+  const now = new Date();
+  if (d.toDateString() === now.toDateString()) return "Today";
+  const yest = new Date(now); yest.setDate(now.getDate() - 1);
+  if (d.toDateString() === yest.toDateString()) return "Yesterday";
+  return d.toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" });
+}
+
+function panelList(){
+  curChat = null;
+  replyTarget = null;
+  unsubMsgs?.();
+  $("panel").innerHTML = `
+    <div class="ph wa-list-header">
+      <b style="flex:1;font-size:20px;letter-spacing:-0.02em">Chats</b>
+      <button class="ib" id="px" aria-label="Close">${IC.x}</button>
+    </div>
+    <div class="wa-search-wrap">
+      <div class="wa-search-box">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input class="in" id="us" placeholder="Search or start new chat…" autocapitalize="none">
+      </div>
+    </div>
+    <div id="ur" class="wa-search-results"></div>
+    <div id="cl" class="wa-chat-list"></div>
+  `;
+  $("px").onclick = closePanel;
+  let t;
+  $("us").oninput = e => {
+    clearTimeout(t);
+    t = setTimeout(() => searchUsers(e.target.value.trim().toLowerCase()), 280);
+  };
+  renderChatList();
+}
+
+async function searchUsers(q){
+  const r = $("ur");
+  if (!q) { r.innerHTML = ""; return; }
+  try {
+    const s = await onceDocs(query(collection(db, "usernames"), where(documentId(), ">=", q), where(documentId(), "<=", q + "\uf8ff"), limit(8)));
+    r.innerHTML = "";
+    const rows = s.filter(d => d.data.uid != me.uid);
+    if (!rows.length) r.innerHTML = '<div class="empty" style="padding:14px">No users found.</div>';
+    for (const d of rows) {
+      const p = await getUserProfile(d.data.uid);
+      const row = document.createElement("div");
+      row.className = "crow wa-crow";
+      row.innerHTML = `${av(d.id, p?.profilePic, "m")}<div class="tx"><div class="wa-crow-top"><b>@${esc(d.id)}</b></div><div class="wa-crow-sub"><small>Tap to message</small></div></div>`;
+      row.onclick = () => openConv(d.data.uid);
+      r.appendChild(row);
+    }
+  } catch {
+    say("Search failed. Try again.");
+  }
+}
+
+const onceDocs = q => new Promise((res, rej) => { const u = onSnapshot(q, s => { u(); res(s.docs.map(d => ({ id: d.id, data: d.data() }))) }, e => { u(); rej(e) }) });
+
+function renderChatList(){
+  const el = $("cl");
+  if (!el) return;
+  const arr = [...chats.entries()].sort((a, b) => ms(b[1].lastMessageTime) - ms(a[1].lastMessageTime));
+  if (!arr.length) {
+    el.innerHTML = '<div class="empty">No chats yet 💬<br>Search a username above to start chatting.</div>';
+    return;
+  }
+  el.innerHTML = "";
+  const s = seen();
+  arr.forEach(([id, c]) => {
+    const o = c.users.find(x => x != me.uid);
+    const row = document.createElement("div");
+    row.className = "crow wa-crow";
+    const unread = c.lastSender && c.lastSender != me.uid && ms(c.lastMessageTime) > (s[id] || 0);
+    const isMine = c.lastSender === me.uid;
+    const timeStr = formatChatTime(c.lastMessageTime);
+    const previewTick = isMine ? '<span class="wa-tick read">✓✓</span> ' : '';
+    row.innerHTML = `
+      <span data-a>${av(c.usernames?.[o], c.profilePics?.[o], "m")}</span>
+      <div class="tx">
+        <div class="wa-crow-top">
+          <b>${esc(c.usernames?.[o] || "user")}</b>
+          <span class="wa-crow-time ${unread ? 'unread' : ''}">${esc(timeStr)}</span>
+        </div>
+        <div class="wa-crow-sub">
+          <small>${previewTick}${esc(c.lastMessage || "New chat")}</small>
+          ${unread ? '<span class="ud wa-unread-dot"></span>' : ""}
+        </div>
+      </div>
+    `;
+    row.onclick = () => openConv(o);
+    el.appendChild(row);
+    getUserProfile(o).then(u => {
+      if (u) {
+        const avEl = row.querySelector("[data-a]");
+        const bEl = row.querySelector("b");
+        if (avEl) avEl.innerHTML = av(u.username, u.profilePic, "m");
+        if (bEl) bEl.innerHTML = esc(u.username) + (isVerifiedUser(u) ? " " + verifiedBadgeHtml(isDevUser(u)) : "");
+      }
+    });
+  });
+}
+
 function updBadge(){const s=seen(),unread=[...chats].some(([id,c])=>c.lastSender&&c.lastSender!=me.uid&&ms(c.lastMessageTime)>(s[id]||0));$("badge").classList.toggle("hide",!unread);$("deskBadge").classList.toggle("hide",!unread)}
 function openPanel(){if(guest){say("Log in to use chat.");return}if(!canAct())return;panelOpen=true;$("panel").classList.add("open");curChat?openConv(curChat.other):panelList()}
 function closePanel(){panelOpen=false;$("panel").classList.remove("open");unsubMsgs?.()}
@@ -2151,23 +3059,214 @@ function watchChat(id){if(watching.has(id))return;watching.add(id);onSnapshot(do
  renderChatList();updBadge()},()=>watching.delete(id))}
 function startNotif(){me.contacts.forEach(u=>watchChat(cid(me.uid,u)));
  onSnapshot(query(collection(db,"chats"),where("users","array-contains",me.uid)),s=>s.docs.forEach(d=>watchChat(d.id)),()=>{})}
-async function openConv(other){const id=cid(me.uid,other),op=await getUserProfile(other);if(!op){say("User not found.");return}
- try{const s=await getDoc(doc(db,"chats",id));if(!s.exists())await setDoc(doc(db,"chats",id),{users:[me.uid,other],usernames:{[me.uid]:me.username,[other]:op.username},profilePics:{[me.uid]:me.profilePic||"",[other]:op.profilePic||""},createdAt:serverTimestamp()});
- if(!me.contacts.includes(other)){me.contacts.push(other);await updateDoc(doc(db,"users",me.uid),{contacts:arrayUnion(other)})}}catch{say("Couldn't open chat.");return}
- watchChat(id);curChat={id,other};panelOpen=true;$("panel").classList.add("open");const el=$("panel");
- el.innerHTML=`<div class="ph"><button class="ib" id="bk" aria-label="Back">${IC.back}</button>${av(op.username,op.profilePic,"m")}<b style="flex:1">@${esc(op.username)}</b><button class="ib" id="px" aria-label="Close">${IC.x}</button></div><div id="msgs"></div><div class="cb"><button class="ib" id="at" aria-label="Attach image">${IC.clip}</button><input class="in" id="mi" placeholder="Write a message…" style="flex:1"><button class="btn pri" id="sd">Send</button></div>`;
- $("bk").onclick=panelList;$("px").onclick=closePanel;$("at").onclick=()=>$("fChat").click();$("sd").onclick=()=>sendMsg();$("mi").onkeydown=e=>{if(e.key=="Enter")sendMsg()};loadMsgs(id);$("mi").focus()}
-function loadMsgs(id){unsubMsgs?.();unsubMsgs=onSnapshot(query(collection(db,"chats",id,"messages"),orderBy("createdAt")),s=>{const el=$("msgs");if(!el||curChat?.id!=id)return;el.innerHTML="";if(s.empty)el.innerHTML='<div class="empty">Send the first message 👋</div>';
- s.docs.forEach(d=>{const m=d.data(),own=m.from==me.uid,b=document.createElement("div");b.className="b"+(own?" me":"");const tm=m.createdAt?new Date(ms(m.createdAt)).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}):"…";
- b.innerHTML=(m.imageUrl?`<img src="${esc(m.imageUrl)}" alt="">`:"")+(m.text?`<span>${esc(m.text)}</span>`:"")+`<small>${tm}${m.edited?" · edited":""}</small>`+(own?'<button class="mm" aria-label="Message options">'+IC.more+'</button>':"");
- if(own)b.querySelector(".mm").onclick=()=>msgMenu(id,d.id,m);el.appendChild(b)});el.scrollTop=el.scrollHeight;setSeen(id,Date.now());updBadge();renderChatList()},()=>say("Couldn't load messages."))}
-function msgMenu(id,mid,m){const o=dlg("Message",`<button class="btn" data-ed ${m.text?"":"disabled"}>${IC.edit} Edit</button><button class="btn dng" data-del>${IC.trash} Delete</button>`,null);o.querySelector("[data-ed]").onclick=()=>{o.remove();dlg("Edit message",`<input class="in" id="et" value="${esc(m.text)}">`,"Save",async d=>{const t=d.querySelector("#et").value.trim();if(!t)return false;await updateDoc(doc(db,"chats",id,"messages",mid),{text:t,edited:true})})};
- o.querySelector("[data-del]").onclick=async()=>{o.remove();if(!confirm("Delete this message?"))return;try{await deleteDoc(doc(db,"chats",id,"messages",mid))}catch{say("Couldn't delete.")}}}
-async function sendMsg(file){const inp=$("mi");if(!inp||!curChat||!canAct())return;const text=inp.value.trim();if(!text&&!file)return;const{id,other}=curChat;inp.value="";const btn=$("sd");
- try{let imageUrl="";if(file){say("Sending image…");imageUrl=imgUrl(await upload(file,{caption:"__chat__",tags:"__chat__"}))}
- const msg={text,from:me.uid,fromName:me.username,createdAt:serverTimestamp(),edited:false};if(imageUrl)msg.imageUrl=imageUrl;await addDoc(collection(db,"chats",id,"messages"),msg);
- const op=await getUserProfile(other);await setDoc(doc(db,"chats",id),{users:[me.uid,other],usernames:{[me.uid]:me.username,[other]:op?.username||""},profilePics:{[me.uid]:me.profilePic||"",[other]:op?.profilePic||""},lastMessage:text||"📷 Photo",lastMessageTime:serverTimestamp(),lastSender:me.uid,lastSenderName:me.username},{merge:true})}
- catch(e){inp.value=text;say(navigator.onLine?"Message not sent. Try again.":"You're offline — message not sent.")}}
+
+function setReply(target) {
+  replyTarget = target;
+  const bar = $("waReplyPreview");
+  if (!bar) return;
+  if (!target) {
+    bar.classList.add("hide");
+    bar.innerHTML = "";
+    return;
+  }
+  bar.classList.remove("hide");
+  bar.innerHTML = `
+    <div class="wa-reply-inner">
+      <div class="wa-reply-bar-accent"></div>
+      <div class="wa-reply-content">
+        <b class="wa-reply-name">${esc(target.fromName || "User")}</b>
+        <span class="wa-reply-text">${esc(target.text || (target.videoUrl ? "🎥 Video" : "📷 Photo"))}</span>
+      </div>
+      <button type="button" class="ib wa-reply-close" id="waReplyCancel" aria-label="Cancel reply">${IC.x}</button>
+    </div>
+  `;
+  $("waReplyCancel").onclick = () => setReply(null);
+  $("mi")?.focus();
+}
+
+async function openConv(other){
+  const id = cid(me.uid, other), op = await getUserProfile(other);
+  if (!op) { say("User not found."); return; }
+  try {
+    const s = await getDoc(doc(db, "chats", id));
+    if (!s.exists()) await setDoc(doc(db, "chats", id), { users: [me.uid, other], usernames: { [me.uid]: me.username, [other]: op.username }, profilePics: { [me.uid]: me.profilePic || "", [other]: op.profilePic || "" }, createdAt: serverTimestamp() });
+    if (!me.contacts.includes(other)) { me.contacts.push(other); await updateDoc(doc(db, "users", me.uid), { contacts: arrayUnion(other) }); }
+  } catch {
+    say("Couldn't open chat.");
+    return;
+  }
+  watchChat(id);
+  curChat = { id, other };
+  replyTarget = null;
+  panelOpen = true;
+  $("panel").classList.add("open");
+  const el = $("panel");
+  const badge = isVerifiedUser(op) ? " " + verifiedBadgeHtml(isDevUser(op)) : "";
+  el.innerHTML = `
+    <div class="ph wa-conv-header">
+      <button class="ib" id="bk" aria-label="Back">${IC.back}</button>
+      <div class="wa-conv-user" id="waUserHeader" title="View profile">
+        ${av(op.username, op.profilePic, "m")}
+        <div class="wa-conv-user-text">
+          <b>${esc(op.username)}${badge}</b>
+          <small>tap for profile</small>
+        </div>
+      </div>
+      <button class="ib" id="px" aria-label="Close">${IC.x}</button>
+    </div>
+    <div id="msgs" class="wa-msgs-bg"></div>
+    <div id="waReplyPreview" class="wa-reply-preview hide"></div>
+    <div class="cb wa-composer">
+      <div class="wa-input-pill">
+        <button class="ib wa-attach-btn" id="at" aria-label="Attach media" title="Send photo or video">${IC.clip}</button>
+        <input class="in" id="mi" placeholder="Message" autocomplete="off">
+      </div>
+      <button class="wa-send-btn" id="sd" aria-label="Send">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+      </button>
+    </div>
+  `;
+  $("bk").onclick = panelList;
+  $("px").onclick = closePanel;
+  $("waUserHeader").onclick = () => { closePanel(); nav("profile"); openProfile(other); };
+  $("at").onclick = () => $("fChat").click();
+  $("sd").onclick = () => sendMsg();
+  $("mi").onkeydown = e => { if (e.key == "Enter") sendMsg(); };
+  loadMsgs(id);
+  $("mi").focus();
+}
+
+function loadMsgs(id){
+  unsubMsgs?.();
+  unsubMsgs = onSnapshot(query(collection(db, "chats", id, "messages"), orderBy("createdAt")), s => {
+    const el = $("msgs");
+    if (!el || curChat?.id != id) return;
+    el.innerHTML = "";
+    if (s.empty) el.innerHTML = '<div class="empty wa-empty">Messages are end-to-end synced.<br>Say hi! 👋</div>';
+    let lastDateStr = "";
+    let lastSenderId = "";
+    s.docs.forEach(d => {
+      const m = d.data();
+      const own = m.from == me.uid;
+      const msgDate = m.createdAt ? new Date(ms(m.createdAt)) : new Date();
+      const dateStr = msgDate.toDateString();
+      if (dateStr !== lastDateStr) {
+        lastDateStr = dateStr;
+        lastSenderId = "";
+        const divider = document.createElement("div");
+        divider.className = "wa-date-divider";
+        divider.innerHTML = `<span>${esc(formatDateDivider(msgDate))}</span>`;
+        el.appendChild(divider);
+      }
+      const isFirstInGroup = m.from !== lastSenderId;
+      lastSenderId = m.from;
+
+      const b = document.createElement("div");
+      b.className = "b wa-bubble" + (own ? " me" : "") + (isFirstInGroup ? " tail" : "");
+      const tm = m.createdAt ? msgDate.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "…";
+      const replyHtml = m.replyTo ? `
+        <div class="wa-quoted-msg">
+          <b>${esc(m.replyTo.fromName || "User")}</b>
+          <span>${esc(m.replyTo.text || (m.replyTo.videoUrl ? "🎥 Video" : "📷 Photo"))}</span>
+        </div>
+      ` : "";
+      const mediaHtml = m.videoUrl
+        ? `<video class="wa-msg-video" data-vsrc="${esc(m.videoUrl)}" controls playsinline preload="metadata"></video>`
+        : (m.imageUrl ? `<img class="wa-msg-img" src="${esc(m.imageUrl)}" alt="">` : "");
+      const ticksHtml = own ? `<span class="wa-tick ${m.createdAt ? 'read' : ''}">✓✓</span>` : "";
+
+      b.innerHTML = `
+        ${replyHtml}
+        ${mediaHtml}
+        ${m.text ? `<span class="wa-msg-text">${esc(m.text)}</span>` : ""}
+        <div class="wa-msg-meta">
+          <small>${tm}${m.edited ? " · edited" : ""}</small>
+          ${ticksHtml}
+        </div>
+        <div class="wa-msg-actions">
+          <button type="button" class="wa-act-btn" data-reply title="Reply" aria-label="Reply">↩</button>
+          ${own ? `<button type="button" class="wa-act-btn mm" title="Options" aria-label="Message options">${IC.more}</button>` : ""}
+        </div>
+      `;
+
+      b.querySelector("[data-reply]").onclick = e => {
+        e.stopPropagation();
+        setReply({ text: m.text || "", fromName: m.fromName || (own ? me.username : "User"), imageUrl: m.imageUrl, videoUrl: m.videoUrl });
+      };
+      if (own) b.querySelector(".mm").onclick = e => { e.stopPropagation(); msgMenu(id, d.id, m); };
+      const imgEl = b.querySelector(".wa-msg-img");
+      if (imgEl) imgEl.onclick = () => fullView({ mediaUrl: m.imageUrl, username: m.fromName, caption: m.text || "" });
+      b.querySelectorAll("video[data-vsrc]").forEach(v => loadVideoSrc(v, v.getAttribute("data-vsrc")));
+      el.appendChild(b);
+    });
+    el.scrollTop = el.scrollHeight;
+    setSeen(id, Date.now());
+    updBadge();
+    renderChatList();
+  }, () => say("Couldn't load messages."));
+}
+
+function msgMenu(id,mid,m){
+  const o = dlg("Message", `<button class="btn" data-ed ${m.text ? "" : "disabled"}>${IC.edit} Edit</button><button class="btn dng" data-del>${IC.trash} Delete</button>`, null);
+  o.querySelector("[data-ed]").onclick = () => {
+    o.remove();
+    dlg("Edit message", `<input class="in" id="et" value="${esc(m.text)}">`, "Save", async d => {
+      const t = d.querySelector("#et").value.trim();
+      if (!t) return false;
+      await updateDoc(doc(db, "chats", id, "messages", mid), { text: t, edited: true });
+    });
+  };
+  o.querySelector("[data-del]").onclick = async () => {
+    o.remove();
+    if (!confirm("Delete this message?")) return;
+    try { await deleteDoc(doc(db, "chats", id, "messages", mid)); } catch { say("Couldn't delete."); }
+  };
+}
+
+async function sendMsg(file){
+  const inp = $("mi");
+  if (!inp || !curChat || !canAct()) return;
+  const text = inp.value.trim();
+  if (!text && !file) return;
+  const { id, other } = curChat;
+  const currentReply = replyTarget;
+  inp.value = "";
+  setReply(null);
+  try {
+    let imageUrl = "", videoUrl = "";
+    if (file) {
+      const isVid = file.type.startsWith("video/") || /\.(mp4|mov|webm)$/i.test(file.name);
+      if (isVid) {
+        say(file.size > 5 * 1024 * 1024 ? "Compressing & sending video…" : "Sending video…");
+        const compressed = file.size > 5 * 1024 * 1024 ? await compressVideo(file) : file;
+        videoUrl = imgUrl(await upload(compressed, { caption: "__chat__", tags: "__chat__" }));
+      } else {
+        say(file.size > 5 * 1024 * 1024 ? "Compressing & sending photo…" : "Sending photo…");
+        const compressedImg = file.size > 5 * 1024 * 1024 ? await compressImage(file, 5 * 1024 * 1024) : file;
+        imageUrl = imgUrl(await upload(compressedImg, { caption: "__chat__", tags: "__chat__" }));
+      }
+    }
+    const msg = { text, from: me.uid, fromName: me.username, createdAt: serverTimestamp(), edited: false };
+    if (imageUrl) msg.imageUrl = imageUrl;
+    if (videoUrl) msg.videoUrl = videoUrl;
+    if (currentReply) msg.replyTo = currentReply;
+    await addDoc(collection(db, "chats", id, "messages"), msg);
+    const op = await getUserProfile(other);
+    const lastText = text || (videoUrl ? "🎥 Video" : "📷 Photo");
+    await setDoc(doc(db, "chats", id), {
+      users: [me.uid, other],
+      usernames: { [me.uid]: me.username, [other]: op?.username || "" },
+      profilePics: { [me.uid]: me.profilePic || "", [other]: op?.profilePic || "" },
+      lastMessage: lastText,
+      lastMessageTime: serverTimestamp(),
+      lastSender: me.uid,
+      lastSenderName: me.username
+    }, { merge: true });
+  } catch (e) {
+    inp.value = text;
+    say(navigator.onLine ? "Message not sent. Try again." : "You're offline — message not sent.");
+  }
+}
 $("fChat").onchange=e=>{const f=e.target.files[0];e.target.value="";if(f)sendMsg(f)};
 function updVerify(){$("vb").classList.toggle("hide",guest||!me||me.verified!==false||isDevUser(me))}
 $("vRe").onclick=()=>busy($("vRe"),async()=>{await sendEmailVerification(auth.currentUser);mailSent("verify")});
@@ -2217,5 +3316,78 @@ $("deskSearch").onclick=()=>$("nSearch").click();
 $("deskChat").onclick=()=>$("nChat").click();
 $("deskPost").onclick=()=>$("nPost").click();
 $("deskProf").onclick=()=>$("nProf").click();
+$("deskSettings")?.addEventListener("click", openSettings);
+
+let isRefreshingApp = false;
+async function refreshAppFeed() {
+  if (isRefreshingApp) return;
+  isRefreshingApp = true;
+  const rBtn = $("refreshBtn");
+  rBtn?.classList.add("spinning");
+  try {
+    await loadImages();
+    if (!$("profile")?.classList.contains("hide")) {
+      await openProfile();
+    }
+    say("Updated ✓");
+  } catch {
+    say("Refresh failed. Check connection.");
+  } finally {
+    rBtn?.classList.remove("spinning");
+    isRefreshingApp = false;
+  }
+}
+$("refreshBtn")?.addEventListener("click", refreshAppFeed);
+
+// Mobile Pull-to-Refresh on #main
+(function setupPullToRefresh() {
+  const mainEl = $("main");
+  const ptr = $("ptrIndicator");
+  const ptrText = $("ptrText");
+  if (!mainEl || !ptr) return;
+  let startY = 0, pulling = false, pullDist = 0;
+
+  mainEl.addEventListener("touchstart", e => {
+    if (mainEl.scrollTop <= 0 && !isRefreshingApp && e.touches.length === 1) {
+      startY = e.touches[0].clientY;
+      pulling = true;
+      pullDist = 0;
+    } else {
+      pulling = false;
+    }
+  }, { passive: true });
+
+  mainEl.addEventListener("touchmove", e => {
+    if (!pulling || isRefreshingApp) return;
+    const dy = e.touches[0].clientY - startY;
+    if (dy > 8 && mainEl.scrollTop <= 0) {
+      pullDist = Math.min(88, dy * 0.55);
+      ptr.style.height = pullDist + "px";
+      ptr.style.opacity = Math.min(1, pullDist / 50);
+      ptr.classList.toggle("ready", pullDist >= 56);
+      if (ptrText) ptrText.textContent = pullDist >= 56 ? "Release to refresh" : "Pull to refresh";
+    } else if (dy <= 0) {
+      pulling = false;
+      ptr.style.height = "0px";
+      ptr.style.opacity = "0";
+    }
+  }, { passive: true });
+
+  mainEl.addEventListener("touchend", async () => {
+    if (!pulling) return;
+    pulling = false;
+    if (pullDist >= 56) {
+      ptr.style.height = "46px";
+      ptr.style.opacity = "1";
+      ptr.classList.add("refreshing");
+      if (ptrText) ptrText.textContent = "Refreshing…";
+      await refreshAppFeed();
+    }
+    ptr.classList.remove("ready", "refreshing");
+    ptr.style.height = "0px";
+    ptr.style.opacity = "0";
+    pullDist = 0;
+  }, { passive: true });
+})();
 $("q").oninput=()=>{nav("home");renderGallery()};
 addEventListener("online",()=>{$("off").classList.add("hide");if(ready)loadImages()});addEventListener("offline",()=>$("off").classList.remove("hide"));if(!navigator.onLine)$("off").classList.remove("hide");

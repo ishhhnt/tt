@@ -1,6 +1,7 @@
 try{
-  localStorage.setItem('theme','dark');
-  document.documentElement.setAttribute('data-theme','dark');
+  var savedTheme = localStorage.getItem('theme') || 'amoled';
+  if(savedTheme === 'dark' || savedTheme === 'blue') savedTheme = 'amoled';
+  document.documentElement.setAttribute('data-theme', savedTheme);
 }catch(e){}
 
 (function(){
@@ -8,10 +9,19 @@ try{
   window.IC={x:u('x'),back:u('back'),clip:u('clip'),dl:u('dl'),edit:u('edit'),trash:u('trash'),more:u('more'),out:u('out'),expand:u('expand'),heart:u('heart'),chat:u('chat')};
   window.avErr=function(i){var s=document.createElement('span');s.className=i.className;s.textContent=i.getAttribute('data-l')||'?';i.replaceWith(s)};
 
-  function sync(){
+  function syncMeta(t){
     var m=document.querySelector('meta[name=theme-color]');
-    if(m) m.setAttribute('content','#000000');
+    if(m) m.setAttribute('content', t === 'light' ? '#f4f6f9' : (t === 'midnight' ? '#0b0f19' : '#000000'));
   }
 
-  document.addEventListener('DOMContentLoaded',sync);
+  window.setAppTheme = function(t){
+    var theme = (t === 'light' || t === 'midnight' || t === 'amoled') ? t : 'amoled';
+    try{ localStorage.setItem('theme', theme); }catch(e){}
+    document.documentElement.setAttribute('data-theme', theme);
+    syncMeta(theme);
+  };
+
+  document.addEventListener('DOMContentLoaded', function(){
+    syncMeta(document.documentElement.getAttribute('data-theme') || 'amoled');
+  });
 })();
